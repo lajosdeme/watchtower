@@ -206,14 +206,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabNews].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
-			} else if m.activeTab == TabLocal && len(m.localNews) > 0 {
-				m.selectedLocalNewsIdx = minInt(m.selectedLocalNewsIdx+1, len(m.localNews)-1)
-				{
-					newsContent, hdrLines := m.renderLocalContent()
-					m.localNewsHeaderLines = hdrLines
-					m.viewports[TabLocal].SetContent(newsContent)
-				}
-				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
+				// Force a redraw by sending a WindowSizeMsg
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
 			} else {
 				m.viewports[m.activeTab].LineDown(1)
 			}
@@ -226,14 +225,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabNews].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
-			} else if m.activeTab == TabLocal && len(m.localNews) > 0 {
-				m.selectedLocalNewsIdx = maxInt(m.selectedLocalNewsIdx-1, 0)
-				{
-					newsContent, hdrLines := m.renderLocalContent()
-					m.localNewsHeaderLines = hdrLines
-					m.viewports[TabLocal].SetContent(newsContent)
-				}
-				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
+				// Force a redraw by sending a WindowSizeMsg
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
 			} else {
 				m.viewports[m.activeTab].LineUp(1)
 			}
@@ -322,20 +320,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "g":
 			if m.activeTab == TabNews {
 				m.selectedNewsIdx = 0
-				{
-					newsContent, hdrLines := m.renderNewsContent()
-					m.newsHeaderLines = hdrLines
-					m.viewports[TabNews].SetContent(newsContent)
-				}
-				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
-			} else if m.activeTab == TabLocal {
-				m.selectedLocalNewsIdx = 0
-				{
-					newsContent, hdrLines := m.renderLocalContent()
-					m.localNewsHeaderLines = hdrLines
-					m.viewports[TabLocal].SetContent(newsContent)
-				}
-				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
+				newsContent, hdrLines := m.renderNewsContent()
+				m.newsHeaderLines = hdrLines
+				m.viewports[TabNews].SetContent(newsContent)
+				m.viewports[TabNews].GotoTop()
+
+				// Force a redraw by sending a WindowSizeMsg
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
 			} else {
 				m.viewports[m.activeTab].GotoTop()
 			}
@@ -905,20 +901,28 @@ func (m Model) renderNewsContent() (string, int) {
 	// ── Top header: country risk panel spanning full width ────────────────
 	innerW := m.width - 6 // account for pane borders/padding
 
-	header := m.renderCountryRiskPanel(innerW)
+	header, countryRiskLines := m.renderCountryRiskPanel(innerW)
 	divider := StyleDivider.Render(strings.Repeat("─", innerW))
 	sectionHdr := StyleSectionHeader.Render(
 		fmt.Sprintf(" ARTICLES  (%d)  ·  j/k navigate  ·  enter to open in browser", len(m.globalNews)))
 
-	// Count the header lines so scrollToSelected knows where articles start.
-	// We count actual \n characters in the rendered strings.
-	headerBlock := header + "\n" + divider + "\n\n" + sectionHdr + "\n\n"
-	hdrLines := strings.Count(headerBlock, "\n")
+	// Header lines = country risk panel lines + divider + section header + blank lines
+	// header + "\n" + divider + "\n\n" + sectionHdr + "\n\n"
+	// = countryRiskLines + 1 + 3 + 3 = countryRiskLines + 7
+	hdrLines := countryRiskLines + 7
 
 	sb.WriteString(header)
 	sb.WriteString("\n")
 	sb.WriteString(divider + "\n\n")
 	sb.WriteString(sectionHdr + "\n\n")
+
+	// Calculate available width for title line
+	// Badge (~9) + source (~15) + age (~8) + urlIndicator (~3) + separators (~4) = ~39
+	// Use innerW - 39 as title width, minimum 20 chars
+	titleW := innerW - 39
+	if titleW < 20 {
+		titleW = 20
+	}
 
 	for i, item := range m.globalNews {
 		if i >= 200 {
@@ -928,7 +932,12 @@ func (m Model) renderNewsContent() (string, int) {
 		source := StyleSource.Render(item.Source)
 		age := StyleAge.Render(formatAge(item.Published))
 
+		// Truncate title to fit exactly one line
 		titleLine := item.Title
+		if len(titleLine) > titleW {
+			runes := []rune(titleLine)
+			titleLine = string(runes[:titleW-1]) + "…"
+		}
 		urlIndicator := ""
 		if item.URL != "" {
 			urlIndicator = StyleMuted.Render("  ↗")
@@ -950,7 +959,7 @@ func (m Model) renderNewsContent() (string, int) {
 	return sb.String(), hdrLines
 }
 
-func (m Model) renderCountryRiskPanel(w int) string {
+func (m Model) renderCountryRiskPanel(w int) (string, int) {
 	var sb strings.Builder
 	sb.WriteString(StyleBriefTitle.Render("🌡  COUNTRY RISK INDEX") + "\n")
 	sb.WriteString(StyleDivider.Render(strings.Repeat("─", minInt(w, 120))) + "\n")
@@ -961,7 +970,7 @@ func (m Model) renderCountryRiskPanel(w int) string {
 		} else {
 			sb.WriteString(StyleMuted.Render("  Press [b] to generate risk scores.") + "\n")
 		}
-		return sb.String()
+		return sb.String(), strings.Count(sb.String(), "\n")
 	}
 
 	// Layout constants — all plain character widths, no ANSI in fmt verbs
@@ -1080,7 +1089,7 @@ func (m Model) renderCountryRiskPanel(w int) string {
 		}
 	}
 
-	return sb.String()
+	return sb.String(), strings.Count(sb.String(), "\n")
 }
 
 func (m Model) renderLocalContent() (string, int) {
@@ -1162,16 +1171,13 @@ func (m Model) renderLocalContent() (string, int) {
 	return sb.String(), hdrLines
 }
 
-// scrollNewsToSelected adjusts the news viewport so the selected article
-// is always visible. Each article occupies exactly 3 lines (line1, line2, blank).
-// newsHeaderLines is set by renderNewsContent before this is called.
 // scrollNewsToSelected adjusts the news viewport so the selected article stays visible.
 // Each article is exactly 3 lines. Called after selectedNewsIdx or content changes.
 // vp is a pointer to m.viewports[TabNews] from the calling Update copy.
 func scrollNewsIntoView(vp *viewport.Model, headerLines, selectedIdx int) {
 	// When selectedIdx is 0, show the country risk panel at the top
 	if selectedIdx == 0 {
-		vp.SetYOffset(0)
+		vp.GotoTop() // Use built-in method instead of SetYOffset(0)
 		return
 	}
 	const linesPerItem = 3
