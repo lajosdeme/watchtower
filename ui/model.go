@@ -174,6 +174,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "tab", "right", "l":
 			m.activeTab = (m.activeTab + 1) % tabCount
+			cmds = append(cmds, func() tea.Msg {
+				return tea.WindowSizeMsg{
+					Width:  m.width,
+					Height: m.height,
+				}
+			})
 		case "shift+tab", "left", "h":
 			m.activeTab = (m.activeTab - 1 + tabCount) % tabCount
 		case "1":
@@ -182,6 +188,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activeTab = TabNews
 		case "3":
 			m.activeTab = TabLocal
+			cmds = append(cmds, func() tea.Msg {
+				return tea.WindowSizeMsg{
+					Width:  m.width,
+					Height: m.height,
+				}
+			})
 		case "r":
 			m.lastRefresh = time.Time{}
 			cmds = append(cmds, doRefreshAll(m.cfg))
@@ -206,7 +218,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabNews].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
-				// Force a redraw by sending a WindowSizeMsg
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
+			} else if m.activeTab == TabLocal && len(m.localNews) > 0 {
+				m.selectedLocalNewsIdx = minInt(m.selectedLocalNewsIdx+1, len(m.localNews)-1)
+				{
+					newsContent, hdrLines := m.renderLocalContent()
+					m.localNewsHeaderLines = hdrLines
+					m.viewports[TabLocal].SetContent(newsContent)
+				}
+				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
 				cmds = append(cmds, func() tea.Msg {
 					return tea.WindowSizeMsg{
 						Width:  m.width,
@@ -225,7 +250,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabNews].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
-				// Force a redraw by sending a WindowSizeMsg
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
+			} else if m.activeTab == TabLocal && len(m.localNews) > 0 {
+				m.selectedLocalNewsIdx = maxInt(m.selectedLocalNewsIdx-1, 0)
+				{
+					newsContent, hdrLines := m.renderLocalContent()
+					m.localNewsHeaderLines = hdrLines
+					m.viewports[TabLocal].SetContent(newsContent)
+				}
+				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
 				cmds = append(cmds, func() tea.Msg {
 					return tea.WindowSizeMsg{
 						Width:  m.width,
@@ -282,6 +320,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabLocal].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
 			default:
 				m.viewports[m.activeTab].HalfViewDown()
 			}
@@ -310,6 +354,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabLocal].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
 			default:
 				m.viewports[m.activeTab].HalfViewUp()
 			}
@@ -342,21 +392,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.viewports[m.activeTab].GotoBottom()
 			}
 		case "g":
-			if m.activeTab == TabNews {
+			switch m.activeTab {
+			case TabNews:
 				m.selectedNewsIdx = 0
 				newsContent, hdrLines := m.renderNewsContent()
 				m.newsHeaderLines = hdrLines
 				m.viewports[TabNews].SetContent(newsContent)
 				m.viewports[TabNews].GotoTop()
 
-				// Force a redraw by sending a WindowSizeMsg
 				cmds = append(cmds, func() tea.Msg {
 					return tea.WindowSizeMsg{
 						Width:  m.width,
 						Height: m.height,
 					}
 				})
-			} else {
+			case TabLocal:
+				m.selectedLocalNewsIdx = 0
+				newsContent, hdrLines := m.renderLocalContent()
+				m.localNewsHeaderLines = hdrLines
+				m.viewports[TabLocal].SetContent(newsContent)
+				m.viewports[TabLocal].GotoTop()
+
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
+			default:
 				m.viewports[m.activeTab].GotoTop()
 			}
 		}
