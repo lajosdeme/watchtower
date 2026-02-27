@@ -364,7 +364,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m Model) View() string {
 	if m.width == 0 {
-		return "Initializing WorldTUI..."
+		return "Initializing Watchtower..."
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		m.renderHeader(),
@@ -384,7 +384,7 @@ func (m Model) renderHeader() string {
 	if !m.lastRefresh.IsZero() {
 		refreshStr = fmt.Sprintf("  updated %s", m.lastRefresh.Format("15:04:05"))
 	}
-	title := StyleTitle.Render("🌍 WORLDTUI")
+	title := StyleTitle.Render("🌍 WATCHTOWER")
 	right := StyleSubtitle.Render("real-time intelligence" + loadStr + refreshStr)
 	gap := m.width - lipgloss.Width(title) - lipgloss.Width(right) - 4
 	if gap < 1 {
@@ -535,7 +535,7 @@ func (m Model) renderBriefPanel(w, h int) string {
 
 	if m.cfg.GroqAPIKey == "" {
 		sb.WriteString(StyleWarning.Render("⚠  No GROQ_API_KEY set.\n\n"))
-		sb.WriteString(StyleMuted.Render("Add key to:\n~/.config/worldtui/config.yaml\n\nGet free key:\nconsole.groq.com\n\nPress [b] after adding key."))
+		sb.WriteString(StyleMuted.Render("Add key to:\n~/.config/watchtower/config.yaml\n\nGet free key:\nconsole.groq.com\n\nPress [b] after adding key."))
 		return sb.String()
 	}
 

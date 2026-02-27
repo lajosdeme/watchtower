@@ -34,7 +34,7 @@ var httpClient = &http.Client{Timeout: 30 * time.Second}
 func GenerateBrief(ctx context.Context, apiKey string, items []feeds.NewsItem) (*Brief, error) {
 	if apiKey == "" {
 		return &Brief{
-			Summary:     "No GROQ_API_KEY set. Add it to ~/.config/worldtui/config.yaml to enable AI briefings.",
+			Summary:     "No GROQ_API_KEY set. Add it to ~/.config/watchtower/config.yaml to enable AI briefings.",
 			GeneratedAt: time.Now(),
 			Model:       "none",
 		}, nil
