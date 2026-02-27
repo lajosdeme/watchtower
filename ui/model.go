@@ -258,7 +258,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		case "d":
-			if m.activeTab == TabNews {
+			switch m.activeTab {
+			case TabNews:
 				m.selectedNewsIdx = minInt(m.selectedNewsIdx+10, maxInt(len(m.globalNews)-1, 0))
 				{
 					newsContent, hdrLines := m.renderNewsContent()
@@ -266,7 +267,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabNews].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
-			} else if m.activeTab == TabLocal {
+				// Force a redraw by sending a WindowSizeMsg
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
+			case TabLocal:
 				m.selectedLocalNewsIdx = minInt(m.selectedLocalNewsIdx+10, maxInt(len(m.localNews)-1, 0))
 				{
 					newsContent, hdrLines := m.renderLocalContent()
@@ -274,11 +282,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabLocal].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
-			} else {
+			default:
 				m.viewports[m.activeTab].HalfViewDown()
 			}
 		case "u":
-			if m.activeTab == TabNews {
+			switch m.activeTab {
+			case TabNews:
 				m.selectedNewsIdx = maxInt(m.selectedNewsIdx-10, 0)
 				{
 					newsContent, hdrLines := m.renderNewsContent()
@@ -286,7 +295,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabNews].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
-			} else if m.activeTab == TabLocal {
+				// Force a redraw by sending a WindowSizeMsg
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
+			case TabLocal:
 				m.selectedLocalNewsIdx = maxInt(m.selectedLocalNewsIdx-10, 0)
 				{
 					newsContent, hdrLines := m.renderLocalContent()
@@ -294,11 +310,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabLocal].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
-			} else {
+			default:
 				m.viewports[m.activeTab].HalfViewUp()
 			}
 		case "G":
-			if m.activeTab == TabNews {
+			switch m.activeTab {
+			case TabNews:
 				m.selectedNewsIdx = maxInt(len(m.globalNews)-1, 0)
 				{
 					newsContent, hdrLines := m.renderNewsContent()
@@ -306,7 +323,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabNews].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
-			} else if m.activeTab == TabLocal {
+				// Force a redraw by sending a WindowSizeMsg
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
+			case TabLocal:
 				m.selectedLocalNewsIdx = maxInt(len(m.localNews)-1, 0)
 				{
 					newsContent, hdrLines := m.renderLocalContent()
@@ -314,7 +338,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabLocal].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
-			} else {
+			default:
 				m.viewports[m.activeTab].GotoBottom()
 			}
 		case "g":
@@ -544,11 +568,12 @@ func (m Model) renderFooter() string {
 		return StyleFooterStatus.Width(m.width).Render("  ✓ " + m.statusMsg)
 	}
 	var hint string
-	if m.activeTab == TabNews {
+	switch m.activeTab {
+	case TabNews:
 		hint = "  jk navigate  enter open in browser  d/u page  g/G top/bottom  tab switch  r refresh  b brief  q quit"
-	} else if m.activeTab == TabLocal {
+	case TabLocal:
 		hint = "  jk navigate  enter open in browser  d/u page  g/G top/bottom  tab switch  r refresh  q quit"
-	} else {
+	default:
 		hint = "  ↑↓/jk scroll  tab/←→ switch  1 overview  2 news  3 local  r refresh  b brief  q quit"
 	}
 	return StyleFooter.Width(m.width).Render(hint)
