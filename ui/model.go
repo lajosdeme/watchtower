@@ -1,0 +1,892 @@
+package ui
+
+import (
+	"context"
+	"fmt"
+	"strings"
+	"time"
+	"watchtower/config"
+	"watchtower/feeds"
+	"watchtower/intel"
+	"watchtower/markets"
+	"watchtower/weather"
+
+	"github.com/charmbracelet/bubbles/spinner"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+)
+
+// Tab indices — 3 tabs now
+const (
+	TabOverview = iota
+	TabNews
+	TabLocal
+	tabCount
+)
+
+// Message types
+type (
+	globalNewsMsg struct {
+		items []feeds.NewsItem
+		err   error
+	}
+	localNewsMsg struct {
+		items []feeds.NewsItem
+		err   error
+	}
+	cryptoMsg struct {
+		prices []markets.CryptoPrice
+		err    error
+	}
+	stockMsg struct {
+		indices []markets.StockIndex
+		err     error
+	}
+	commodityMsg struct {
+		commodities []markets.Commodity
+		err         error
+	}
+	polymarketMsg struct {
+		markets []markets.PredictionMarket
+		err     error
+	}
+	weatherMsg struct {
+		cond     *weather.Conditions
+		forecast []weather.DayForecast
+		err      error
+	}
+	briefMsg struct {
+		brief *intel.Brief
+		err   error
+	}
+	tickMsg time.Time
+)
+
+// Model is the root bubbletea model
+type Model struct {
+	cfg       *config.Config
+	width     int
+	height    int
+	activeTab int
+
+	// Data
+	globalNews   []feeds.NewsItem
+	localNews    []feeds.NewsItem
+	cryptoPrices []markets.CryptoPrice
+	stockIndices []markets.StockIndex
+	commodities  []markets.Commodity
+	polyMarkets  []markets.PredictionMarket
+	weatherCond  *weather.Conditions
+	forecast     []weather.DayForecast
+	brief        *intel.Brief
+
+	// State
+	loading     map[string]bool
+	errors      map[string]string
+	lastRefresh time.Time
+
+	// Viewports for scrollable panes
+	viewports [tabCount]viewport.Model
+	spinner   spinner.Model
+}
+
+func NewModel(cfg *config.Config) Model {
+	sp := spinner.New()
+	sp.Spinner = spinner.Dot
+	sp.Style = StyleSpinner
+
+	vps := [tabCount]viewport.Model{}
+	for i := range vps {
+		vps[i] = viewport.New(80, 30)
+	}
+
+	return Model{
+		cfg:       cfg,
+		loading:   make(map[string]bool),
+		errors:    make(map[string]string),
+		spinner:   sp,
+		viewports: vps,
+		activeTab: TabOverview,
+	}
+}
+
+func (m Model) Init() tea.Cmd {
+	return tea.Batch(
+		m.spinner.Tick,
+		doRefreshAll(m.cfg),
+		tickEvery(time.Duration(m.cfg.RefreshSec)*time.Second),
+	)
+}
+
+func tickEvery(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg { return tickMsg(t) })
+}
+
+func doRefreshAll(cfg *config.Config) tea.Cmd {
+	return tea.Batch(
+		fetchGlobalNews(),
+		fetchLocalNews(cfg.Location.City, cfg.Location.Country),
+		fetchCrypto(cfg.CryptoPairs),
+		fetchStocks(),
+		fetchCommodities(),
+		fetchPolymarket(),
+		fetchWeather(cfg.Location.Latitude, cfg.Location.Longitude, cfg.Location.City),
+	)
+}
+
+// ─── Update ───────────────────────────────────────────────────────────────────
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmds []tea.Cmd
+
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		contentH := m.height - 6
+		for i := range m.viewports {
+			m.viewports[i].Width = msg.Width - 4
+			m.viewports[i].Height = contentH
+		}
+		m.viewports[TabOverview].SetContent(m.renderOverviewContent())
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "q", "ctrl+c":
+			return m, tea.Quit
+		case "tab", "right", "l":
+			m.activeTab = (m.activeTab + 1) % tabCount
+		case "shift+tab", "left", "h":
+			m.activeTab = (m.activeTab - 1 + tabCount) % tabCount
+		case "1":
+			m.activeTab = TabOverview
+		case "2":
+			m.activeTab = TabNews
+		case "3":
+			m.activeTab = TabLocal
+		case "r":
+			m.lastRefresh = time.Time{}
+			cmds = append(cmds, doRefreshAll(m.cfg))
+		case "b":
+			if m.cfg.GroqAPIKey != "" {
+				m.loading["brief"] = true
+				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews))
+			}
+		case "j", "down":
+			m.viewports[m.activeTab].LineDown(1)
+		case "k", "up":
+			m.viewports[m.activeTab].LineUp(1)
+		case "d":
+			m.viewports[m.activeTab].HalfViewDown()
+		case "u":
+			m.viewports[m.activeTab].HalfViewUp()
+		case "G":
+			m.viewports[m.activeTab].GotoBottom()
+		case "g":
+			m.viewports[m.activeTab].GotoTop()
+		}
+
+	case spinner.TickMsg:
+		var cmd tea.Cmd
+		m.spinner, cmd = m.spinner.Update(msg)
+		cmds = append(cmds, cmd)
+		// Keep overview spinner animated while loading
+		if len(m.loading) > 0 {
+			m.viewports[TabOverview].SetContent(m.renderOverviewContent())
+		}
+
+	case tickMsg:
+		m.lastRefresh = time.Time{}
+		cmds = append(cmds,
+			doRefreshAll(m.cfg),
+			tickEvery(time.Duration(m.cfg.RefreshSec)*time.Second),
+		)
+
+	case globalNewsMsg:
+		delete(m.loading, "global")
+		if msg.err != nil {
+			m.errors["global"] = msg.err.Error()
+		} else {
+			m.globalNews = msg.items
+			delete(m.errors, "global")
+			if m.cfg.GroqAPIKey != "" && m.brief == nil {
+				m.loading["brief"] = true
+				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews))
+			}
+		}
+		m.viewports[TabNews].SetContent(m.renderNewsContent())
+		m.viewports[TabOverview].SetContent(m.renderOverviewContent())
+
+	case localNewsMsg:
+		delete(m.loading, "local")
+		if msg.err != nil {
+			m.errors["local"] = msg.err.Error()
+		} else {
+			m.localNews = msg.items
+			delete(m.errors, "local")
+		}
+		m.viewports[TabLocal].SetContent(m.renderLocalContent())
+
+	case cryptoMsg:
+		delete(m.loading, "crypto")
+		if msg.err != nil {
+			m.errors["crypto"] = msg.err.Error()
+		} else {
+			m.cryptoPrices = msg.prices
+			delete(m.errors, "crypto")
+		}
+		m.viewports[TabOverview].SetContent(m.renderOverviewContent())
+
+	case stockMsg:
+		delete(m.loading, "stocks")
+		if msg.err != nil {
+			m.errors["stocks"] = msg.err.Error()
+		} else {
+			m.stockIndices = msg.indices
+			delete(m.errors, "stocks")
+		}
+		m.viewports[TabOverview].SetContent(m.renderOverviewContent())
+
+	case commodityMsg:
+		delete(m.loading, "commodities")
+		if msg.err != nil {
+			m.errors["commodities"] = msg.err.Error()
+		} else {
+			m.commodities = msg.commodities
+			delete(m.errors, "commodities")
+		}
+		m.viewports[TabOverview].SetContent(m.renderOverviewContent())
+
+	case polymarketMsg:
+		delete(m.loading, "poly")
+		if msg.err != nil {
+			m.errors["poly"] = msg.err.Error()
+		} else {
+			m.polyMarkets = msg.markets
+			delete(m.errors, "poly")
+		}
+		m.viewports[TabOverview].SetContent(m.renderOverviewContent())
+
+	case weatherMsg:
+		delete(m.loading, "weather")
+		if msg.err != nil {
+			m.errors["weather"] = msg.err.Error()
+		} else {
+			m.weatherCond = msg.cond
+			m.forecast = msg.forecast
+			delete(m.errors, "weather")
+		}
+		m.viewports[TabLocal].SetContent(m.renderLocalContent())
+		m.viewports[TabOverview].SetContent(m.renderOverviewContent())
+
+	case briefMsg:
+		delete(m.loading, "brief")
+		if msg.err != nil {
+			m.errors["brief"] = msg.err.Error()
+		} else {
+			m.brief = msg.brief
+			delete(m.errors, "brief")
+			m.lastRefresh = time.Now()
+		}
+		m.viewports[TabOverview].SetContent(m.renderOverviewContent())
+	}
+
+	return m, tea.Batch(cmds...)
+}
+
+// ─── View ─────────────────────────────────────────────────────────────────────
+
+func (m Model) View() string {
+	if m.width == 0 {
+		return "Initializing WorldTUI..."
+	}
+	return lipgloss.JoinVertical(lipgloss.Left,
+		m.renderHeader(),
+		m.renderTabs(),
+		m.renderActivePane(),
+		m.renderFooter(),
+	)
+}
+
+func (m Model) renderHeader() string {
+	isLoading := len(m.loading) > 0
+	loadStr := ""
+	if isLoading {
+		loadStr = "  " + m.spinner.View() + " loading..."
+	}
+	refreshStr := ""
+	if !m.lastRefresh.IsZero() {
+		refreshStr = fmt.Sprintf("  updated %s", m.lastRefresh.Format("15:04:05"))
+	}
+	title := StyleTitle.Render("🌍 WORLDTUI")
+	right := StyleSubtitle.Render("real-time intelligence" + loadStr + refreshStr)
+	gap := m.width - lipgloss.Width(title) - lipgloss.Width(right) - 4
+	if gap < 1 {
+		gap = 1
+	}
+	return StyleHeader.Width(m.width).Render(
+		title + strings.Repeat(" ", gap) + right,
+	)
+}
+
+func (m Model) renderTabs() string {
+	names := []string{"1 Overview", "2 Global News", "3 Local"}
+	var parts []string
+	for i, name := range names {
+		if i == m.activeTab {
+			parts = append(parts, StyleActiveTab.Render("[ "+name+" ]"))
+		} else {
+			parts = append(parts, StyleInactiveTab.Render("  "+name+"  "))
+		}
+	}
+	return StyleTabBar.Width(m.width).Render(strings.Join(parts, " "))
+}
+
+func (m Model) renderActivePane() string {
+	contentH := m.height - 6
+	if contentH < 5 {
+		contentH = 5
+	}
+	return StylePane.Width(m.width - 2).Height(contentH).Render(
+		m.viewports[m.activeTab].View(),
+	)
+}
+
+func (m Model) renderFooter() string {
+	hint := "  ↑↓/jk scroll  tab/←→ switch  1 overview  2 news  3 local  r refresh  b brief  q quit"
+	return StyleFooter.Width(m.width).Render(hint)
+}
+
+// ─── Overview: 2×2 grid ───────────────────────────────────────────────────────
+
+func (m Model) renderOverviewContent() string {
+	if m.width == 0 {
+		return ""
+	}
+
+	// Available inner width (minus outer pane border+padding = 4)
+	innerW := m.width - 4
+	halfW := innerW / 2
+
+	// Available inner height
+	contentH := m.height - 6
+	if contentH < 10 {
+		contentH = 10
+	}
+	// Top row gets ~40% of height, bottom row gets ~55% (crypto panel needs more space)
+	topH := (contentH * 4) / 10
+	botH := contentH - topH - 3 // 3 = gap line + borders
+	if topH < 8 {
+		topH = 8
+	}
+	if botH < 8 {
+		botH = 8
+	}
+	topQH := topH - 2
+	botQH := botH - 2
+
+	// Quadrant inner content width
+	qW := halfW - 3
+
+	// Render the four panels
+	topLeft := m.quadrantBox("🌤  WEATHER  "+m.cfg.Location.City, m.renderWeatherPanel(qW, topQH), halfW-1, topH)
+	topRight := m.quadrantBox("🧠  INTEL BRIEF", m.renderBriefPanel(qW, topQH), halfW-1, topH)
+	botLeft := m.quadrantBox("₿  MARKETS & PRICES", m.renderCryptoPanel(qW, botQH), halfW-1, botH)
+	botRight := m.quadrantBox("📊  PREDICTION MARKETS", m.renderPolyPanel(qW, botQH), halfW-1, botH)
+
+	topRow := lipgloss.JoinHorizontal(lipgloss.Top, topLeft, " ", topRight)
+	botRow := lipgloss.JoinHorizontal(lipgloss.Top, botLeft, " ", botRight)
+
+	return lipgloss.JoinVertical(lipgloss.Left, topRow, "", botRow)
+}
+
+// quadrantBox wraps content in a rounded border with a colored title bar
+func (m Model) quadrantBox(title, content string, w, h int) string {
+	titleLine := StyleQuadrantTitle.Width(w).Render(title)
+	body := StyleQuadrantPane.Width(w).Height(h).Render(content)
+	return lipgloss.JoinVertical(lipgloss.Left, titleLine, body)
+}
+
+// ─── Quadrant content renderers ───────────────────────────────────────────────
+
+func (m Model) renderWeatherPanel(w, h int) string {
+	var sb strings.Builder
+
+	if errMsg, ok := m.errors["weather"]; ok {
+		return StyleError.Render("⚠ " + errMsg)
+	}
+	if m.weatherCond == nil {
+		return m.spinner.View() + " fetching weather..."
+	}
+
+	wc := m.weatherCond
+	// Large icon + temp on first line
+	sb.WriteString(fmt.Sprintf("%s  %s\n", wc.Icon,
+		StyleWeatherTemp.Render(fmt.Sprintf("%.1f°C", wc.TempC))))
+	sb.WriteString(StyleWeatherDesc.Render(wc.Description) + "\n")
+	sb.WriteString(StyleAge.Render(fmt.Sprintf("Feels like %.1f°C", wc.FeelsLikeC)) + "\n\n")
+	sb.WriteString(fmt.Sprintf("💧 %d%%   💨 %.0f km/h %s   ☀ UV %.0f\n",
+		wc.Humidity, wc.WindSpeedKmh,
+		weather.WindDirectionStr(wc.WindDirection), wc.UVIndex))
+
+	// Compact forecast — as many rows as fit
+	if len(m.forecast) > 0 {
+		sb.WriteString("\n")
+		sb.WriteString(StyleTableHeader.Render(
+			fmt.Sprintf("%-10s  %-4s %5s %5s %5s", "Day", "", "Hi", "Lo", "Rain")) + "\n")
+		sb.WriteString(StyleDivider.Render(strings.Repeat("─", minInt(w, 36))) + "\n")
+		maxRows := h - 8
+		if maxRows < 1 {
+			maxRows = 1
+		}
+		for i, f := range m.forecast {
+			if i >= maxRows {
+				break
+			}
+			dayLabel := f.Date.Format("Mon 02 Jan")
+			if i == 0 {
+				dayLabel = "Today     "
+			}
+			sb.WriteString(fmt.Sprintf("%-10s  %s  %4.0f° %4.0f° %3.0fmm\n",
+				dayLabel, f.Icon, f.MaxTempC, f.MinTempC, f.RainMM))
+		}
+	}
+
+	return sb.String()
+}
+
+func (m Model) renderBriefPanel(w, h int) string {
+	var sb strings.Builder
+
+	if m.cfg.GroqAPIKey == "" {
+		sb.WriteString(StyleWarning.Render("⚠  No GROQ_API_KEY set.\n\n"))
+		sb.WriteString(StyleMuted.Render("Add key to:\n~/.config/worldtui/config.yaml\n\nGet free key:\nconsole.groq.com\n\nPress [b] after adding key."))
+		return sb.String()
+	}
+
+	if m.loading["brief"] {
+		sb.WriteString(m.spinner.View() + " Generating brief...\n\n")
+		sb.WriteString(StyleMuted.Render("Calling Groq / Llama 3.1..."))
+		return sb.String()
+	}
+
+	if errMsg, ok := m.errors["brief"]; ok {
+		sb.WriteString(StyleError.Render("⚠ "+errMsg) + "\n\n")
+		sb.WriteString(StyleMuted.Render("Press [b] to retry."))
+		return sb.String()
+	}
+
+	if m.brief == nil {
+		if len(m.globalNews) == 0 {
+			sb.WriteString(StyleMuted.Render("Waiting for news to load..."))
+		} else {
+			sb.WriteString(StyleMuted.Render("Press [b] to generate AI brief."))
+		}
+		return sb.String()
+	}
+
+	b := m.brief
+	sb.WriteString(StyleBriefMeta.Render(b.GeneratedAt.Format("15:04:05")+"  "+b.Model) + "\n\n")
+
+	// Word-wrapped summary
+	wrapped := wordWrap(b.Summary, w-2)
+	for _, line := range strings.Split(wrapped, "\n") {
+		sb.WriteString(line + "\n")
+	}
+
+	if len(b.KeyThreats) > 0 {
+		sb.WriteString("\n" + StyleBriefTitle.Render("KEY THREATS") + "\n")
+		for _, t := range b.KeyThreats {
+			// Word-wrap each threat to panel width rather than truncating
+			wrapped := wordWrap("● "+t, w-2)
+			for i, line := range strings.Split(wrapped, "\n") {
+				if i == 0 {
+					sb.WriteString(StyleThreatItem.Render(line) + "\n")
+				} else {
+					// Indent continuation lines to align past the bullet
+					sb.WriteString(StyleThreatItem.Render("  "+line) + "\n")
+				}
+			}
+		}
+	}
+
+	return sb.String()
+}
+
+func (m Model) renderCryptoPanel(w, h int) string {
+	var sb strings.Builder
+
+	// ── Crypto ────────────────────────────────────────────────────────────────
+	if errMsg, ok := m.errors["crypto"]; ok {
+		sb.WriteString(StyleError.Render("⚠ crypto: "+errMsg) + "\n")
+	} else if len(m.cryptoPrices) == 0 {
+		sb.WriteString(m.spinner.View() + " fetching crypto...\n")
+	} else {
+		symW := 5
+		priceW := 11
+		changeW := 8
+		nameW := w - symW - priceW - changeW - 4
+		if nameW < 4 {
+			nameW = 4
+		}
+		hdr := fmt.Sprintf("%-*s %-*s %*s %*s",
+			symW, "SYM", nameW, "NAME", priceW, "PRICE", changeW, "24H%")
+		sb.WriteString(StyleTableHeader.Render(hdr) + "\n")
+		sb.WriteString(StyleDivider.Render(strings.Repeat("─", minInt(w-1, 55))) + "\n")
+		for _, p := range m.cryptoPrices {
+			chStyle := StylePositive
+			chIcon := "▲"
+			if p.Change24h < 0 {
+				chStyle = StyleNegative
+				chIcon = "▼"
+			}
+			name := p.Name
+			if len(name) > nameW {
+				name = name[:nameW-1] + "…"
+			}
+			row := fmt.Sprintf("%-*s %-*s %*s ",
+				symW, StyleSymbol.Render(p.Symbol),
+				nameW, name,
+				priceW, markets.FormatPrice(p.PriceUSD),
+			)
+			sb.WriteString(row + chStyle.Render(fmt.Sprintf("%s%5.2f%%", chIcon, p.Change24h)) + "\n")
+		}
+	}
+
+	sb.WriteString("\n")
+
+	// ── Stock Indices ─────────────────────────────────────────────────────────
+	sb.WriteString(StyleSubSectionHeader.Render(" INDICES") + "\n")
+	if errMsg, ok := m.errors["stocks"]; ok {
+		sb.WriteString(StyleError.Render("⚠ "+errMsg) + "\n")
+	} else if len(m.stockIndices) == 0 {
+		sb.WriteString(StyleMuted.Render("  "+m.spinner.View()+" fetching...") + "\n")
+	} else {
+		nameW := w - 14
+		if nameW < 6 {
+			nameW = 6
+		}
+		for _, idx := range m.stockIndices {
+			chStyle := StylePositive
+			chIcon := "▲"
+			if idx.ChangePct < 0 {
+				chStyle = StyleNegative
+				chIcon = "▼"
+			}
+			name := idx.Name
+			if len(name) > nameW {
+				name = name[:nameW-1] + "…"
+			}
+			sb.WriteString(fmt.Sprintf("%-*s %11s %s\n",
+				nameW, name,
+				markets.FormatPrice(idx.Price),
+				chStyle.Render(fmt.Sprintf("%s%5.2f%%", chIcon, idx.ChangePct)),
+			))
+		}
+	}
+
+	sb.WriteString("\n")
+
+	// ── Commodities ───────────────────────────────────────────────────────────
+	sb.WriteString(StyleSubSectionHeader.Render(" COMMODITIES") + "\n")
+	if errMsg, ok := m.errors["commodities"]; ok {
+		sb.WriteString(StyleError.Render("⚠ "+errMsg) + "\n")
+	} else if len(m.commodities) == 0 {
+		sb.WriteString(StyleMuted.Render("  "+m.spinner.View()+" fetching...") + "\n")
+	} else {
+		nameW := w - 22
+		if nameW < 6 {
+			nameW = 6
+		}
+		for _, c := range m.commodities {
+			chStyle := StylePositive
+			chIcon := "▲"
+			if c.ChangePct < 0 {
+				chStyle = StyleNegative
+				chIcon = "▼"
+			}
+			name := c.Name
+			if len(name) > nameW {
+				name = name[:nameW-1] + "…"
+			}
+			unitStr := StyleMuted.Render(fmt.Sprintf("%-6s", c.Unit))
+			sb.WriteString(fmt.Sprintf("%-*s %9s %s %s\n",
+				nameW, name,
+				markets.FormatPrice(c.Price),
+				unitStr,
+				chStyle.Render(fmt.Sprintf("%s%5.2f%%", chIcon, c.ChangePct)),
+			))
+		}
+	}
+
+	return StyleQuadrantPane.Width(w).Height(h).Render(sb.String())
+}
+
+func (m Model) renderPolyPanel(w, h int) string {
+	var sb strings.Builder
+
+	if errMsg, ok := m.errors["poly"]; ok {
+		return StyleError.Render("⚠ " + errMsg)
+	}
+	if len(m.polyMarkets) == 0 {
+		return m.spinner.View() + " fetching markets..."
+	}
+
+	// Title column gets most space; reserve room for pct (7) + ends (6) + spacing (3)
+	titleW := w - 16
+	if titleW < 10 {
+		titleW = 10
+	}
+
+	hdr := fmt.Sprintf("%-*s %6s  %5s", titleW, "QUESTION", "YES%", "ENDS")
+	sb.WriteString(StyleTableHeader.Render(hdr) + "\n")
+	sb.WriteString(StyleDivider.Render(strings.Repeat("─", minInt(w-1, 70))) + "\n")
+
+	maxRows := h - 2
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	for i, pm := range m.polyMarkets {
+		if i >= maxRows {
+			break
+		}
+		pct := pm.Probability * 100
+		pctStyle := StyleNeutral
+		switch {
+		case pct >= 66:
+			pctStyle = StylePositive
+		case pct <= 33:
+			pctStyle = StyleNegative
+		}
+		title := pm.Title
+		if len(title) > titleW {
+			title = title[:titleW-3] + "..."
+		}
+		endDate := pm.EndDate
+		if len(endDate) >= 10 {
+			endDate = endDate[5:10] // MM-DD
+		}
+		sb.WriteString(fmt.Sprintf("%-*s %s  %5s\n",
+			titleW, title,
+			pctStyle.Render(fmt.Sprintf("%5.1f%%", pct)),
+			endDate,
+		))
+	}
+
+	return sb.String()
+}
+
+// ─── Full-screen pane renderers ───────────────────────────────────────────────
+
+func (m Model) renderNewsContent() string {
+	var sb strings.Builder
+
+	if errMsg, ok := m.errors["global"]; ok {
+		sb.WriteString(StyleError.Render("⚠ Error: "+errMsg) + "\n\n")
+	}
+	if len(m.globalNews) == 0 {
+		if m.loading["global"] {
+			return "  " + m.spinner.View() + " Fetching global news..."
+		}
+		return "  No news loaded. Press r to refresh."
+	}
+
+	sb.WriteString(StyleSectionHeader.Render(
+		fmt.Sprintf(" GLOBAL NEWS  (%d items)", len(m.globalNews))) + "\n\n")
+
+	for i, item := range m.globalNews {
+		if i >= 200 {
+			break
+		}
+		badge := threatStyle(item.ThreatLevel).Render(fmt.Sprintf(" %-8s", item.ThreatLevel.String()))
+		source := StyleSource.Render(item.Source)
+		age := StyleAge.Render(formatAge(item.Published))
+		sb.WriteString(fmt.Sprintf("%s %s  %s\n  %s\n\n",
+			badge, source, age,
+			StyleNewsTitle.Render(item.Title)))
+	}
+	return sb.String()
+}
+
+func (m Model) renderLocalContent() string {
+	var sb strings.Builder
+
+	if m.weatherCond != nil {
+		wc := m.weatherCond
+		sb.WriteString(StyleSectionHeader.Render(" WEATHER  "+wc.City) + "\n\n")
+		sb.WriteString(fmt.Sprintf("  %s  %s  %.1f°C  (feels like %.1f°C)\n",
+			wc.Icon, wc.Description, wc.TempC, wc.FeelsLikeC))
+		sb.WriteString(fmt.Sprintf("  💧 Humidity: %d%%   💨 Wind: %.0f km/h %s   👁 Visibility: %.0f km   ☀ UV: %.0f\n\n",
+			wc.Humidity, wc.WindSpeedKmh,
+			weather.WindDirectionStr(wc.WindDirection),
+			wc.Visibility/1000, wc.UVIndex))
+		if len(m.forecast) > 0 {
+			sb.WriteString(StyleTableHeader.Render(
+				fmt.Sprintf("  %-12s %-16s %8s %8s %10s", "DATE", "CONDITION", "MAX", "MIN", "RAIN")) + "\n")
+			sb.WriteString(StyleDivider.Render(strings.Repeat("─", 60)) + "\n")
+			for _, f := range m.forecast {
+				sb.WriteString(fmt.Sprintf("  %-12s %s %-12s %6.1f°C %6.1f°C %7.1fmm\n",
+					f.Date.Format("Mon Jan 02"), f.Icon, f.Desc,
+					f.MaxTempC, f.MinTempC, f.RainMM))
+			}
+		}
+	} else if errMsg, ok := m.errors["weather"]; ok {
+		sb.WriteString(StyleError.Render("⚠ Weather error: "+errMsg) + "\n")
+	} else {
+		sb.WriteString("  " + m.spinner.View() + " Fetching weather...\n")
+	}
+
+	sb.WriteString("\n")
+	sb.WriteString(StyleSectionHeader.Render(" LOCAL NEWS  "+m.cfg.Location.City) + "\n\n")
+
+	if errMsg, ok := m.errors["local"]; ok {
+		sb.WriteString(StyleError.Render("⚠ "+errMsg) + "\n")
+	} else if len(m.localNews) == 0 {
+		sb.WriteString("  No local news loaded. Press r to refresh.\n")
+	} else {
+		for i, item := range m.localNews {
+			if i >= 100 {
+				break
+			}
+			badge := threatStyle(item.ThreatLevel).Render(fmt.Sprintf(" %-6s", item.ThreatLevel.String()))
+			age := StyleAge.Render(formatAge(item.Published))
+			sb.WriteString(fmt.Sprintf("%s %s  %s\n\n",
+				badge, age, StyleNewsTitle.Render(item.Title)))
+		}
+	}
+	return sb.String()
+}
+
+// ─── Tea commands ─────────────────────────────────────────────────────────────
+
+func fetchGlobalNews() tea.Cmd {
+	return func() tea.Msg {
+		items, err := feeds.FetchGlobalNews(context.Background())
+		return globalNewsMsg{items, err}
+	}
+}
+
+func fetchLocalNews(city, country string) tea.Cmd {
+	return func() tea.Msg {
+		items, err := feeds.FetchLocalNews(context.Background(), city, country)
+		return localNewsMsg{items, err}
+	}
+}
+
+func fetchCrypto(pairs []string) tea.Cmd {
+	return func() tea.Msg {
+		prices, err := markets.FetchCryptoPrices(context.Background(), pairs)
+		return cryptoMsg{prices, err}
+	}
+}
+
+func fetchStocks() tea.Cmd {
+	return func() tea.Msg {
+		indices, err := markets.FetchStockIndices(context.Background())
+		return stockMsg{indices, err}
+	}
+}
+
+func fetchCommodities() tea.Cmd {
+	return func() tea.Msg {
+		commodities, err := markets.FetchCommodities(context.Background())
+		return commodityMsg{commodities, err}
+	}
+}
+
+func fetchPolymarket() tea.Cmd {
+	return func() tea.Msg {
+		mkts, err := markets.FetchPredictionMarkets(context.Background())
+		return polymarketMsg{mkts, err}
+	}
+}
+
+func fetchWeather(lat, lon float64, city string) tea.Cmd {
+	return func() tea.Msg {
+		cond, forecast, err := weather.Fetch(context.Background(), lat, lon, city)
+		return weatherMsg{cond, forecast, err}
+	}
+}
+
+func fetchBrief(apiKey string, items []feeds.NewsItem) tea.Cmd {
+	return func() tea.Msg {
+		b, err := intel.GenerateBrief(context.Background(), apiKey, items)
+		return briefMsg{b, err}
+	}
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+func formatAge(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return t.Format("Jan 02")
+	}
+}
+
+func probabilityBar(p float64, width int) string {
+	filled := int(p * float64(width))
+	empty := width - filled
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", empty)
+	switch {
+	case p >= 0.66:
+		return StylePositive.Render(bar)
+	case p <= 0.33:
+		return StyleNegative.Render(bar)
+	default:
+		return StyleNeutral.Render(bar)
+	}
+}
+
+func wordWrap(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	words := strings.Fields(s)
+	var lines []string
+	var line strings.Builder
+	for _, w := range words {
+		if line.Len()+len(w)+1 > width {
+			lines = append(lines, line.String())
+			line.Reset()
+		}
+		if line.Len() > 0 {
+			line.WriteByte(' ')
+		}
+		line.WriteString(w)
+	}
+	if line.Len() > 0 {
+		lines = append(lines, line.String())
+	}
+	return strings.Join(lines, "\n")
+}
+
+func threatStyle(level feeds.ThreatLevel) lipgloss.Style {
+	switch level {
+	case feeds.ThreatCritical:
+		return StyleCritical
+	case feeds.ThreatHigh:
+		return StyleHighThreat
+	case feeds.ThreatMedium:
+		return StyleMediumThreat
+	case feeds.ThreatLow:
+		return StyleLowThreat
+	default:
+		return StyleInfoThreat
+	}
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
