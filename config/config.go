@@ -9,10 +9,11 @@ import (
 )
 
 type Config struct {
-	GroqAPIKey  string   `mapstructure:"groq_api_key"`
-	Location    Location `mapstructure:"location"`
-	RefreshSec  int      `mapstructure:"refresh_seconds"`
-	CryptoPairs []string `mapstructure:"crypto_pairs"`
+	GroqAPIKey     string   `mapstructure:"groq_api_key"`
+	Location       Location `mapstructure:"location"`
+	RefreshSec     int      `mapstructure:"refresh_seconds"`
+	CryptoPairs    []string `mapstructure:"crypto_pairs"`
+	BriefCacheMins int      `mapstructure:"brief_cache_minutes"`
 }
 
 type Location struct {
@@ -64,6 +65,9 @@ func Load() (*Config, error) {
 	if cfg.RefreshSec == 0 {
 		cfg.RefreshSec = 120
 	}
+	if cfg.BriefCacheMins == 0 {
+		cfg.BriefCacheMins = 60
+	}
 	if len(cfg.CryptoPairs) == 0 {
 		cfg.CryptoPairs = []string{"bitcoin", "ethereum", "dogecoin", "usd-coin"}
 	}
@@ -71,7 +75,7 @@ func Load() (*Config, error) {
 	return &cfg, nil
 }
 
-const defaultConfig = `# watchtower Configuration
+const defaultConfig = `# Watchtower Configuration
 # https://github.com/lajosdeme/watchtower
 
 # Get a free API key at https://console.groq.com
@@ -87,12 +91,14 @@ location:
 # How often to refresh data (seconds)
 refresh_seconds: 120
 
+# How long to cache the AI brief before regenerating (minutes)
+# Set to 0 to always generate fresh on startup
+brief_cache_minutes: 60
+
 # Crypto pairs to track (CoinGecko IDs)
 crypto_pairs:
   - bitcoin
   - ethereum
-  - solana
-  - binancecoin
-  - ripple
-  - cardano
+  - dogecoin
+  - usd-coin
 `

@@ -58,8 +58,9 @@ type (
 		err      error
 	}
 	briefMsg struct {
-		brief *intel.Brief
-		err   error
+		brief     *intel.Brief
+		err       error
+		fromCache bool
 	}
 	tickMsg time.Time
 )
@@ -128,6 +129,7 @@ func (m Model) Init() tea.Cmd {
 		m.spinner.Tick,
 		doRefreshAll(m.cfg),
 		tickEvery(time.Duration(m.cfg.RefreshSec)*time.Second),
+		loadCachedBrief(m.cfg),
 	)
 }
 
@@ -183,7 +185,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "b":
 			if m.cfg.GroqAPIKey != "" {
 				m.loading["brief"] = true
-				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews))
+				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews, m.cfg.BriefCacheMins, false))
+			}
+		case "B":
+			if m.cfg.GroqAPIKey != "" {
+				m.loading["brief"] = true
+				m.statusMsg = "Forcing fresh brief (ignoring cache)..."
+				m.statusExpiry = time.Now().Add(3 * time.Second)
+				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews, m.cfg.BriefCacheMins, true))
 			}
 		case "j", "down":
 			if m.activeTab == TabNews && len(m.globalNews) > 0 {
@@ -266,7 +275,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			delete(m.errors, "global")
 			if m.cfg.GroqAPIKey != "" && m.brief == nil {
 				m.loading["brief"] = true
-				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews))
+				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews, m.cfg.BriefCacheMins, false))
 			}
 		}
 		m.viewports[TabNews].SetContent(m.renderNewsContent())
@@ -342,6 +351,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.brief = msg.brief
 			delete(m.errors, "brief")
 			m.lastRefresh = time.Now()
+			if msg.fromCache {
+				m.statusMsg = "Brief loaded from cache (" + msg.brief.GeneratedAt.Format("Jan 02 15:04") + ")"
+			} else {
+				// Persist fresh result to disk cache
+				go intel.SaveCachedBrief(msg.brief)
+				m.statusMsg = "Brief generated and cached"
+			}
+			m.statusExpiry = time.Now().Add(4 * time.Second)
 		}
 		m.viewports[TabOverview].SetContent(m.renderOverviewContent())
 		// Re-render news pane too so country risk header updates
@@ -561,7 +578,16 @@ func (m Model) renderBriefPanel(w, h int) string {
 	}
 
 	b := m.brief
-	sb.WriteString(StyleBriefMeta.Render(b.GeneratedAt.Format("15:04:05")+"  "+b.Model) + "\n\n")
+	cacheAge := ""
+	if time.Since(b.GeneratedAt) > time.Minute {
+		mins := int(time.Since(b.GeneratedAt).Minutes())
+		if mins >= 60 {
+			cacheAge = fmt.Sprintf("  cached %dh%dm ago", mins/60, mins%60)
+		} else {
+			cacheAge = fmt.Sprintf("  cached %dm ago", mins)
+		}
+	}
+	sb.WriteString(StyleBriefMeta.Render(b.GeneratedAt.Format("15:04")+"  "+b.Model+cacheAge) + "\n\n")
 
 	// Word-wrapped summary
 	wrapped := wordWrap(b.Summary, w-2)
@@ -1040,10 +1066,37 @@ func fetchWeather(lat, lon float64, city string) tea.Cmd {
 	}
 }
 
-func fetchBrief(apiKey string, items []feeds.NewsItem) tea.Cmd {
+// fetchBrief generates a brief, using the disk cache unless forceRefresh is true.
+// cacheMins=0 means always generate fresh (cache disabled).
+func fetchBrief(apiKey string, items []feeds.NewsItem, cacheMins int, forceRefresh bool) tea.Cmd {
 	return func() tea.Msg {
+		// Try cache first (unless forced refresh or cache disabled)
+		if !forceRefresh && cacheMins > 0 {
+			maxAge := time.Duration(cacheMins) * time.Minute
+			cached, err := intel.LoadCachedBrief(maxAge)
+			if err == nil && cached != nil {
+				return briefMsg{brief: cached, fromCache: true}
+			}
+		}
+		// Cache miss or disabled — call Groq
 		b, err := intel.GenerateBrief(context.Background(), apiKey, items)
-		return briefMsg{b, err}
+		return briefMsg{brief: b, err: err, fromCache: false}
+	}
+}
+
+// loadCachedBrief is fired on Init to immediately populate the brief from
+// disk if a valid cache exists, before any news has loaded.
+func loadCachedBrief(cfg *config.Config) tea.Cmd {
+	return func() tea.Msg {
+		if cfg.BriefCacheMins == 0 {
+			return nil
+		}
+		maxAge := time.Duration(cfg.BriefCacheMins) * time.Minute
+		cached, err := intel.LoadCachedBrief(maxAge)
+		if err != nil || cached == nil {
+			return nil
+		}
+		return briefMsg{brief: cached, fromCache: true}
 	}
 }
 
