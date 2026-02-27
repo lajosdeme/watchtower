@@ -90,10 +90,12 @@ type Model struct {
 	brief        *intel.Brief
 
 	// News selection (for browser open)
-	selectedNewsIdx int
-	newsHeaderLines int // line count of the header above the article list (for scroll tracking)
-	statusMsg       string
-	statusExpiry    time.Time
+	selectedNewsIdx      int
+	newsHeaderLines      int // line count of the header above the article list (for scroll tracking)
+	selectedLocalNewsIdx int
+	localNewsHeaderLines int
+	statusMsg            string
+	statusExpiry         time.Time
 
 	// State
 	loading     map[string]bool
@@ -244,6 +246,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.statusMsg = "No URL available for this article"
 					m.statusExpiry = time.Now().Add(3 * time.Second)
 				}
+			} else if m.activeTab == TabLocal && m.selectedLocalNewsIdx < len(m.localNews) {
+				item := m.localNews[m.selectedLocalNewsIdx]
+				if item.URL != "" {
+					cmds = append(cmds, openURL(item.URL))
+					m.statusMsg = "Opening: " + truncate(item.Title, 60)
+					m.statusExpiry = time.Now().Add(3 * time.Second)
+				} else {
+					m.statusMsg = "No URL available for this article"
+					m.statusExpiry = time.Now().Add(3 * time.Second)
+				}
 			}
 		case "d":
 			if m.activeTab == TabNews {
@@ -254,6 +266,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabNews].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
+			} else if m.activeTab == TabLocal {
+				m.selectedLocalNewsIdx = minInt(m.selectedLocalNewsIdx+10, maxInt(len(m.localNews)-1, 0))
+				{
+					newsContent, hdrLines := m.renderLocalContent()
+					m.localNewsHeaderLines = hdrLines
+					m.viewports[TabLocal].SetContent(newsContent)
+				}
+				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
 			} else {
 				m.viewports[m.activeTab].HalfViewDown()
 			}
@@ -266,6 +286,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabNews].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
+			} else if m.activeTab == TabLocal {
+				m.selectedLocalNewsIdx = maxInt(m.selectedLocalNewsIdx-10, 0)
+				{
+					newsContent, hdrLines := m.renderLocalContent()
+					m.localNewsHeaderLines = hdrLines
+					m.viewports[TabLocal].SetContent(newsContent)
+				}
+				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
 			} else {
 				m.viewports[m.activeTab].HalfViewUp()
 			}
@@ -278,6 +306,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.viewports[TabNews].SetContent(newsContent)
 				}
 				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
+			} else if m.activeTab == TabLocal {
+				m.selectedLocalNewsIdx = maxInt(len(m.localNews)-1, 0)
+				{
+					newsContent, hdrLines := m.renderLocalContent()
+					m.localNewsHeaderLines = hdrLines
+					m.viewports[TabLocal].SetContent(newsContent)
+				}
+				scrollNewsIntoView(&m.viewports[TabLocal], m.localNewsHeaderLines, m.selectedLocalNewsIdx)
 			} else {
 				m.viewports[m.activeTab].GotoBottom()
 			}
@@ -344,7 +380,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.localNews = msg.items
 			delete(m.errors, "local")
 		}
-		m.viewports[TabLocal].SetContent(m.renderLocalContent())
+		{
+			content, hdrLines := m.renderLocalContent()
+			m.localNewsHeaderLines = hdrLines
+			m.viewports[TabLocal].SetContent(content)
+		}
 
 	case cryptoMsg:
 		delete(m.loading, "crypto")
@@ -395,7 +435,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.forecast = msg.forecast
 			delete(m.errors, "weather")
 		}
-		m.viewports[TabLocal].SetContent(m.renderLocalContent())
+		{
+			content, hdrLines := m.renderLocalContent()
+			m.localNewsHeaderLines = hdrLines
+			m.viewports[TabLocal].SetContent(content)
+		}
 		m.viewports[TabOverview].SetContent(m.renderOverviewContent())
 
 	case briefMsg:
@@ -502,6 +546,8 @@ func (m Model) renderFooter() string {
 	var hint string
 	if m.activeTab == TabNews {
 		hint = "  jk navigate  enter open in browser  d/u page  g/G top/bottom  tab switch  r refresh  b brief  q quit"
+	} else if m.activeTab == TabLocal {
+		hint = "  jk navigate  enter open in browser  d/u page  g/G top/bottom  tab switch  r refresh  q quit"
 	} else {
 		hint = "  ↑↓/jk scroll  tab/←→ switch  1 overview  2 news  3 local  r refresh  b brief  q quit"
 	}
@@ -1046,53 +1092,83 @@ func (m Model) renderCountryRiskPanel(w int) (string, int) {
 	return sb.String(), strings.Count(sb.String(), "\n")
 }
 
-func (m Model) renderLocalContent() string {
+func (m Model) renderLocalContent() (string, int) {
 	var sb strings.Builder
 
+	// Build weather section and count its lines
+	weatherBlock := ""
 	if m.weatherCond != nil {
 		wc := m.weatherCond
-		sb.WriteString(StyleSectionHeader.Render(" WEATHER  "+wc.City) + "\n\n")
-		sb.WriteString(fmt.Sprintf("  %s  %s  %.1f°C  (feels like %.1f°C)\n",
-			wc.Icon, wc.Description, wc.TempC, wc.FeelsLikeC))
-		sb.WriteString(fmt.Sprintf("  💧 Humidity: %d%%   💨 Wind: %.0f km/h %s   👁 Visibility: %.0f km   ☀ UV: %.0f\n\n",
+		weatherBlock += StyleSectionHeader.Render(" WEATHER  "+wc.City) + "\n\n"
+		weatherBlock += fmt.Sprintf("  %s  %s  %.1f°C  (feels like %.1f°C)\n",
+			wc.Icon, wc.Description, wc.TempC, wc.FeelsLikeC)
+		weatherBlock += fmt.Sprintf("  💧 Humidity: %d%%   💨 Wind: %.0f km/h %s   👁 Visibility: %.0f km   ☀ UV: %.0f\n\n",
 			wc.Humidity, wc.WindSpeedKmh,
 			weather.WindDirectionStr(wc.WindDirection),
-			wc.Visibility/1000, wc.UVIndex))
+			wc.Visibility/1000, wc.UVIndex)
 		if len(m.forecast) > 0 {
-			sb.WriteString(StyleTableHeader.Render(
-				fmt.Sprintf("  %-12s %-16s %8s %8s %10s", "DATE", "CONDITION", "MAX", "MIN", "RAIN")) + "\n")
-			sb.WriteString(StyleDivider.Render(strings.Repeat("─", 60)) + "\n")
+			weatherBlock += StyleTableHeader.Render(
+				fmt.Sprintf("  %-12s %-16s %8s %8s %10s", "DATE", "CONDITION", "MAX", "MIN", "RAIN")) + "\n"
+			weatherBlock += StyleDivider.Render(strings.Repeat("─", 60)) + "\n"
 			for _, f := range m.forecast {
-				sb.WriteString(fmt.Sprintf("  %-12s %s %-12s %6.1f°C %6.1f°C %7.1fmm\n",
+				weatherBlock += fmt.Sprintf("  %-12s %s %-12s %6.1f°C %6.1f°C %7.1fmm\n",
 					f.Date.Format("Mon Jan 02"), f.Icon, f.Desc,
-					f.MaxTempC, f.MinTempC, f.RainMM))
+					f.MaxTempC, f.MinTempC, f.RainMM)
 			}
+			weatherBlock += "\n"
 		}
-	} else if errMsg, ok := m.errors["weather"]; ok {
-		sb.WriteString(StyleError.Render("⚠ Weather error: "+errMsg) + "\n")
+	} else if _, ok := m.errors["weather"]; ok {
+		weatherBlock += StyleError.Render("⚠ Weather error") + "\n"
 	} else {
-		sb.WriteString("  " + m.spinner.View() + " Fetching weather...\n")
+		weatherBlock += "  " + m.spinner.View() + " Fetching weather...\n"
 	}
 
+	// Count header lines from actual rendered content
+	hdrLines := strings.Count(weatherBlock, "\n")
+
+	// Local news header section
+	sb.WriteString(weatherBlock)
 	sb.WriteString("\n")
-	sb.WriteString(StyleSectionHeader.Render(" LOCAL NEWS  "+m.cfg.Location.City) + "\n\n")
+	localHdr := StyleSectionHeader.Render(" LOCAL NEWS  " + m.cfg.Location.City)
+	sb.WriteString(localHdr + "\n\n")
+	hdrLines += strings.Count(localHdr+"\n\n", "\n")
 
 	if errMsg, ok := m.errors["local"]; ok {
 		sb.WriteString(StyleError.Render("⚠ "+errMsg) + "\n")
+		hdrLines += strings.Count(StyleError.Render("⚠ "+errMsg)+"\n", "\n")
 	} else if len(m.localNews) == 0 {
 		sb.WriteString("  No local news loaded. Press r to refresh.\n")
+		hdrLines += strings.Count("  No local news loaded. Press r to refresh.\n", "\n")
 	} else {
+		sectionHdr := fmt.Sprintf(" ARTICLES  (%d)  ·  j/k navigate  ·  enter to open in browser", len(m.localNews))
+		sb.WriteString(StyleSectionHeader.Render(sectionHdr) + "\n\n")
+		hdrLines += strings.Count(StyleSectionHeader.Render(sectionHdr)+"\n\n", "\n")
+
 		for i, item := range m.localNews {
 			if i >= 100 {
 				break
 			}
 			badge := threatStyle(item.ThreatLevel).Render(fmt.Sprintf(" %-6s", item.ThreatLevel.String()))
 			age := StyleAge.Render(formatAge(item.Published))
-			sb.WriteString(fmt.Sprintf("%s %s  %s\n\n",
-				badge, age, StyleNewsTitle.Render(item.Title)))
+			urlIndicator := ""
+			if item.URL != "" {
+				urlIndicator = StyleMuted.Render("  ↗")
+			}
+
+			if i == m.selectedLocalNewsIdx {
+				titleLine := item.Title
+				line1 := badge + " " + age + urlIndicator
+				line2 := "  " + StyleSelectedTitle.Render(titleLine)
+				sb.WriteString(StyleSelectedRow.Render(line1) + "\n")
+				sb.WriteString(StyleSelectedRow.Render(line2) + "\n\n")
+			} else {
+				sb.WriteString(fmt.Sprintf("%s %s %s\n  %s\n\n",
+					badge, age, urlIndicator,
+					StyleNewsTitle.Render(item.Title)))
+			}
 		}
 	}
-	return sb.String()
+	return sb.String(), hdrLines
 }
 
 // scrollNewsToSelected adjusts the news viewport so the selected article stays visible.
