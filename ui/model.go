@@ -271,19 +271,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "G":
 			if m.activeTab == TabNews {
-				m.selectedNewsIdx = 0
-				newsContent, hdrLines := m.renderNewsContent()
-				m.newsHeaderLines = hdrLines
-				m.viewports[TabNews].SetContent(newsContent)
-				m.viewports[TabNews].GotoTop()
-
-				// Force a redraw by sending a WindowSizeMsg
-				cmds = append(cmds, func() tea.Msg {
-					return tea.WindowSizeMsg{
-						Width:  m.width,
-						Height: m.height,
-					}
-				})
+				m.selectedNewsIdx = maxInt(len(m.globalNews)-1, 0)
+				{
+					newsContent, hdrLines := m.renderNewsContent()
+					m.newsHeaderLines = hdrLines
+					m.viewports[TabNews].SetContent(newsContent)
+				}
 				scrollNewsIntoView(&m.viewports[TabNews], m.newsHeaderLines, m.selectedNewsIdx)
 			} else {
 				m.viewports[m.activeTab].GotoBottom()
