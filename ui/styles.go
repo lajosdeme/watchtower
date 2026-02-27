@@ -4,18 +4,18 @@ import "github.com/charmbracelet/lipgloss"
 
 // Color palette — dark terminal friendly
 var (
-	colorBg       = lipgloss.Color("#0d1117")
-	colorBorder   = lipgloss.Color("#30363d")
-	colorAccent   = lipgloss.Color("#58a6ff")
-	colorGold     = lipgloss.Color("#d29922")
-	colorGreen    = lipgloss.Color("#3fb950")
-	colorRed      = lipgloss.Color("#f85149")
-	colorOrange   = lipgloss.Color("#db6d28")
-	colorYellow   = lipgloss.Color("#e3b341")
-	colorMuted    = lipgloss.Color("#8b949e")
-	colorWhite    = lipgloss.Color("#e6edf3")
-	colorPurple   = lipgloss.Color("#bc8cff")
-	colorTeal     = lipgloss.Color("#39d353")
+	colorBg     = lipgloss.Color("#0d1117")
+	colorBorder = lipgloss.Color("#30363d")
+	colorAccent = lipgloss.Color("#58a6ff")
+	colorGold   = lipgloss.Color("#d29922")
+	colorGreen  = lipgloss.Color("#3fb950")
+	colorRed    = lipgloss.Color("#f85149")
+	colorOrange = lipgloss.Color("#db6d28")
+	colorYellow = lipgloss.Color("#e3b341")
+	colorMuted  = lipgloss.Color("#8b949e")
+	colorWhite  = lipgloss.Color("#e6edf3")
+	colorPurple = lipgloss.Color("#bc8cff")
+	colorTeal   = lipgloss.Color("#39d353")
 
 	// Backgrounds for badges
 	bgCritical = lipgloss.Color("#b91c1c")
@@ -151,6 +151,22 @@ var (
 	StyleMuted = lipgloss.NewStyle().
 			Foreground(colorMuted)
 
+	// News pane — selected article row
+	StyleSelectedRow = lipgloss.NewStyle().
+				Background(lipgloss.Color("#1c2d40")).
+				Foreground(colorWhite)
+
+	StyleSelectedTitle = lipgloss.NewStyle().
+				Foreground(colorAccent).
+				Bold(true)
+
+	// Footer with status message
+	StyleFooterStatus = lipgloss.NewStyle().
+				Foreground(colorGreen).
+				Background(colorBg).
+				Bold(true).
+				Padding(0, 1)
+
 	// Overview quadrant boxes
 	StyleQuadrantTitle = lipgloss.NewStyle().
 				Foreground(colorAccent).
@@ -171,8 +187,8 @@ var (
 	StyleWeatherTemp = lipgloss.NewStyle().
 				Foreground(colorWhite).
 				Bold(true).
-				// Large-ish — terminal bold is the best we can do without sixels
-				Underline(false)
+		// Large-ish — terminal bold is the best we can do without sixels
+		Underline(false)
 
 	StyleWeatherDesc = lipgloss.NewStyle().
 				Foreground(colorAccent)

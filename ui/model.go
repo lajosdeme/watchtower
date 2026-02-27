@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os/exec"
 	"strings"
 	"time"
 	"watchtower/config"
@@ -63,6 +64,12 @@ type (
 	tickMsg time.Time
 )
 
+// openURLMsg triggers opening a URL in the system browser
+type openURLMsg struct{ url string }
+
+// clearStatusMsg clears the status bar message
+type clearStatusMsg struct{}
+
 // Model is the root bubbletea model
 type Model struct {
 	cfg       *config.Config
@@ -80,6 +87,11 @@ type Model struct {
 	weatherCond  *weather.Conditions
 	forecast     []weather.DayForecast
 	brief        *intel.Brief
+
+	// News selection (for browser open)
+	selectedNewsIdx int
+	statusMsg       string
+	statusExpiry    time.Time
 
 	// State
 	loading     map[string]bool
@@ -174,17 +186,59 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews))
 			}
 		case "j", "down":
-			m.viewports[m.activeTab].LineDown(1)
+			if m.activeTab == TabNews && len(m.globalNews) > 0 {
+				m.selectedNewsIdx = minInt(m.selectedNewsIdx+1, len(m.globalNews)-1)
+				m.viewports[TabNews].SetContent(m.renderNewsContent())
+			} else {
+				m.viewports[m.activeTab].LineDown(1)
+			}
 		case "k", "up":
-			m.viewports[m.activeTab].LineUp(1)
+			if m.activeTab == TabNews && len(m.globalNews) > 0 {
+				m.selectedNewsIdx = maxInt(m.selectedNewsIdx-1, 0)
+				m.viewports[TabNews].SetContent(m.renderNewsContent())
+			} else {
+				m.viewports[m.activeTab].LineUp(1)
+			}
+		case "enter":
+			if m.activeTab == TabNews && m.selectedNewsIdx < len(m.globalNews) {
+				item := m.globalNews[m.selectedNewsIdx]
+				if item.URL != "" {
+					cmds = append(cmds, openURL(item.URL))
+					m.statusMsg = "Opening: " + truncate(item.Title, 60)
+					m.statusExpiry = time.Now().Add(3 * time.Second)
+				} else {
+					m.statusMsg = "No URL available for this article"
+					m.statusExpiry = time.Now().Add(3 * time.Second)
+				}
+			}
 		case "d":
-			m.viewports[m.activeTab].HalfViewDown()
+			if m.activeTab == TabNews {
+				m.selectedNewsIdx = minInt(m.selectedNewsIdx+10, maxInt(len(m.globalNews)-1, 0))
+				m.viewports[TabNews].SetContent(m.renderNewsContent())
+			} else {
+				m.viewports[m.activeTab].HalfViewDown()
+			}
 		case "u":
-			m.viewports[m.activeTab].HalfViewUp()
+			if m.activeTab == TabNews {
+				m.selectedNewsIdx = maxInt(m.selectedNewsIdx-10, 0)
+				m.viewports[TabNews].SetContent(m.renderNewsContent())
+			} else {
+				m.viewports[m.activeTab].HalfViewUp()
+			}
 		case "G":
-			m.viewports[m.activeTab].GotoBottom()
+			if m.activeTab == TabNews {
+				m.selectedNewsIdx = maxInt(len(m.globalNews)-1, 0)
+				m.viewports[TabNews].SetContent(m.renderNewsContent())
+			} else {
+				m.viewports[m.activeTab].GotoBottom()
+			}
 		case "g":
-			m.viewports[m.activeTab].GotoTop()
+			if m.activeTab == TabNews {
+				m.selectedNewsIdx = 0
+				m.viewports[TabNews].SetContent(m.renderNewsContent())
+			} else {
+				m.viewports[m.activeTab].GotoTop()
+			}
 		}
 
 	case spinner.TickMsg:
@@ -290,6 +344,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastRefresh = time.Now()
 		}
 		m.viewports[TabOverview].SetContent(m.renderOverviewContent())
+		// Re-render news pane too so country risk header updates
+		m.viewports[TabNews].SetContent(m.renderNewsContent())
+
+	case openURLMsg:
+		// No-op — the Cmd already ran xdg-open/open; nothing to update
+		_ = msg
+
+	case clearStatusMsg:
+		if time.Now().After(m.statusExpiry) {
+			m.statusMsg = ""
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -354,7 +419,16 @@ func (m Model) renderActivePane() string {
 }
 
 func (m Model) renderFooter() string {
-	hint := "  ↑↓/jk scroll  tab/←→ switch  1 overview  2 news  3 local  r refresh  b brief  q quit"
+	// Show status message if active (e.g. "Opening article...")
+	if m.statusMsg != "" && time.Now().Before(m.statusExpiry) {
+		return StyleFooterStatus.Width(m.width).Render("  ✓ " + m.statusMsg)
+	}
+	var hint string
+	if m.activeTab == TabNews {
+		hint = "  jk navigate  enter open in browser  d/u page  g/G top/bottom  tab switch  r refresh  b brief  q quit"
+	} else {
+		hint = "  ↑↓/jk scroll  tab/←→ switch  1 overview  2 news  3 local  r refresh  b brief  q quit"
+	}
 	return StyleFooter.Width(m.width).Render(hint)
 }
 
@@ -692,8 +766,16 @@ func (m Model) renderNewsContent() string {
 		return "  No news loaded. Press r to refresh."
 	}
 
+	// ── Top header: country risk panel spanning full width ────────────────
+	innerW := m.width - 6 // account for pane borders/padding
+
+	sb.WriteString(m.renderCountryRiskPanel(innerW))
+	sb.WriteString("\n")
+	sb.WriteString(StyleDivider.Render(strings.Repeat("─", innerW)) + "\n\n")
+
+	// ── Article list ─────────────────────────────────────────────────────────
 	sb.WriteString(StyleSectionHeader.Render(
-		fmt.Sprintf(" GLOBAL NEWS  (%d items)", len(m.globalNews))) + "\n\n")
+		fmt.Sprintf(" ARTICLES  (%d)  ·  j/k navigate  ·  enter to open in browser", len(m.globalNews))) + "\n\n")
 
 	for i, item := range m.globalNews {
 		if i >= 200 {
@@ -702,10 +784,159 @@ func (m Model) renderNewsContent() string {
 		badge := threatStyle(item.ThreatLevel).Render(fmt.Sprintf(" %-8s", item.ThreatLevel.String()))
 		source := StyleSource.Render(item.Source)
 		age := StyleAge.Render(formatAge(item.Published))
-		sb.WriteString(fmt.Sprintf("%s %s  %s\n  %s\n\n",
-			badge, source, age,
-			StyleNewsTitle.Render(item.Title)))
+
+		titleLine := item.Title
+		urlIndicator := ""
+		if item.URL != "" {
+			urlIndicator = StyleMuted.Render("  ↗")
+		}
+
+		if i == m.selectedNewsIdx {
+			// Highlighted selected row
+			titleStyled := StyleSelectedTitle.Render(titleLine)
+			line1 := fmt.Sprintf("%s %s  %s%s", badge, source, age, urlIndicator)
+			line2 := "  " + titleStyled
+			sb.WriteString(StyleSelectedRow.Render(line1) + "\n")
+			sb.WriteString(StyleSelectedRow.Render(line2) + "\n\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("%s %s  %s%s\n  %s\n\n",
+				badge, source, age, urlIndicator,
+				StyleNewsTitle.Render(titleLine)))
+		}
 	}
+	return sb.String()
+}
+
+func (m Model) renderCountryRiskPanel(w int) string {
+	var sb strings.Builder
+	sb.WriteString(StyleBriefTitle.Render("🌡  COUNTRY RISK INDEX") + "\n")
+	sb.WriteString(StyleDivider.Render(strings.Repeat("─", minInt(w, 120))) + "\n")
+
+	if m.brief == nil || len(m.brief.CountryRisks) == 0 {
+		if m.loading["brief"] {
+			sb.WriteString("  " + m.spinner.View() + " Computing risks...\n")
+		} else {
+			sb.WriteString(StyleMuted.Render("  Press [b] to generate risk scores.") + "\n")
+		}
+		return sb.String()
+	}
+
+	// Layout constants — all plain character widths, no ANSI in fmt verbs
+	const (
+		scoreW = 4  // " 82 "
+		barW   = 14 // progress bar characters
+		gapW   = 2  // spacing between columns
+	)
+	// nameW: remaining space after score + bar + gaps + leading indent(2)
+	nameW := w - scoreW - barW - gapW*3 - 2
+	if nameW < 8 {
+		nameW = 8
+	}
+	// reasonW: same as nameW but offset past score col
+	reasonW := nameW + scoreW + gapW
+
+	risks := m.brief.CountryRisks
+
+	// Lay countries out in two columns if width allows (>=100 chars)
+	cols := 1
+	colW := w
+	if w >= 100 {
+		cols = 2
+		colW = w / 2
+		// Recalc nameW per column
+		nameW = colW - scoreW - barW - gapW*3 - 2
+		if nameW < 8 {
+			nameW = 8
+		}
+		reasonW = nameW + scoreW + gapW
+	}
+
+	// Build each row as a plain string (styled pieces joined, then padded to colW)
+	renderRow := func(cr intel.CountryRisk, colWidth int) string {
+		score := cr.Score
+
+		barFilled := (score * barW) / 100
+		if barFilled > barW {
+			barFilled = barW
+		}
+		barEmpty := barW - barFilled
+
+		var barStyle lipgloss.Style
+		switch {
+		case score >= 75:
+			barStyle = StyleCritical
+		case score >= 50:
+			barStyle = StyleHighThreat
+		case score >= 25:
+			barStyle = StyleMediumThreat
+		default:
+			barStyle = StyleLowThreat
+		}
+
+		// Score badge: plain fixed-width string, then style applied
+		scoreStr := StyleBriefMeta.Render(fmt.Sprintf("%3d", score))
+
+		// Bar: styled filled + muted empty — both fixed char count
+		bar := barStyle.Render(strings.Repeat("█", barFilled)) +
+			StyleMuted.Render(strings.Repeat("░", barEmpty))
+
+		// Country name: truncate to nameW plain chars BEFORE styling
+		country := cr.Country
+		runes := []rune(country)
+		if len(runes) > nameW {
+			runes = runes[:nameW-1]
+			country = string(runes) + "…"
+		} else {
+			// Pad with spaces to nameW so columns align
+			country = country + strings.Repeat(" ", nameW-len(runes))
+		}
+
+		// Reason: truncate to reasonW plain chars
+		reason := cr.Reason
+		reasonRunes := []rune(reason)
+		if len(reasonRunes) > reasonW {
+			reasonRunes = reasonRunes[:reasonW-3]
+			reason = string(reasonRunes) + "..."
+		}
+
+		line1 := "  " + country + "  " + scoreStr + "  " + bar
+		line2 := "  " + StyleMuted.Render(reason)
+		return line1 + "\n" + line2
+	}
+
+	if cols == 1 {
+		for _, cr := range risks {
+			sb.WriteString(renderRow(cr, colW) + "\n")
+		}
+	} else {
+		// Two columns: pair up rows side by side
+		for i := 0; i < len(risks); i += 2 {
+			left := renderRow(risks[i], colW)
+			leftLines := strings.Split(left, "\n")
+
+			var right []string
+			if i+1 < len(risks) {
+				r := renderRow(risks[i+1], colW)
+				right = strings.Split(r, "\n")
+			}
+
+			// Pad left lines to colW visible chars and join with right
+			for li, ll := range leftLines {
+				// Measure visible width (strip ANSI for measurement)
+				visW := lipgloss.Width(ll)
+				padding := ""
+				if visW < colW {
+					padding = strings.Repeat(" ", colW-visW)
+				}
+				rl := ""
+				if li < len(right) {
+					rl = right[li]
+				}
+				sb.WriteString(ll + padding + rl + "\n")
+			}
+		}
+	}
+
 	return sb.String()
 }
 
@@ -816,6 +1047,30 @@ func fetchBrief(apiKey string, items []feeds.NewsItem) tea.Cmd {
 	}
 }
 
+// ─── Tea commands (continued) ────────────────────────────────────────────────
+
+// openURL opens a URL in the system default browser (cross-platform)
+func openURL(url string) tea.Cmd {
+	return func() tea.Msg {
+		var cmd string
+		var args []string
+		// Detect OS: try xdg-open (Linux), open (macOS), start (Windows)
+		// We use a simple exec approach — errors are silently ignored so
+		// the TUI never crashes if a browser isn't available.
+		for _, candidate := range []string{"xdg-open", "open", "start"} {
+			if isCommandAvailable(candidate) {
+				cmd = candidate
+				args = []string{url}
+				break
+			}
+		}
+		if cmd != "" {
+			execCommand(cmd, args...)
+		}
+		return openURLMsg{url: url}
+	}
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 func formatAge(t time.Time) string {
@@ -889,4 +1144,36 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
+}
+
+// isCommandAvailable checks if a command exists on PATH
+func isCommandAvailable(name string) bool {
+	_, err := execLookPath(name)
+	return err == nil
+}
+
+// execLookPath wraps exec.LookPath
+func execLookPath(name string) (string, error) {
+	return exec.LookPath(name)
+}
+
+// execCommand runs a command in the background, ignoring errors
+func execCommand(name string, args ...string) {
+	cmd := exec.Command(name, args...)
+	// Detach from the TUI process so it doesn't block
+	_ = cmd.Start()
 }
