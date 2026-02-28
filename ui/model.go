@@ -62,6 +62,11 @@ type (
 		err       error
 		fromCache bool
 	}
+	localBriefMsg struct {
+		brief     *intel.LocalBrief
+		err       error
+		fromCache bool
+	}
 	tickMsg time.Time
 )
 
@@ -88,6 +93,7 @@ type Model struct {
 	weatherCond  *weather.Conditions
 	forecast     []weather.DayForecast
 	brief        *intel.Brief
+	localBrief   *intel.LocalBrief
 
 	// News selection (for browser open)
 	selectedNewsIdx      int
@@ -133,6 +139,7 @@ func (m Model) Init() tea.Cmd {
 		doRefreshAll(m.cfg),
 		tickEvery(time.Duration(m.cfg.RefreshSec)*time.Second),
 		loadCachedBrief(m.cfg),
+		loadCachedLocalBrief(m.cfg),
 	)
 }
 
@@ -208,6 +215,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.statusMsg = "Forcing fresh brief (ignoring cache)..."
 				m.statusExpiry = time.Now().Add(3 * time.Second)
 				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews, m.cfg.BriefCacheMins, true))
+			}
+		case "i":
+			if m.cfg.GroqAPIKey != "" && m.activeTab == TabLocal {
+				m.loading["localBrief"] = true
+				cmds = append(cmds, fetchLocalBrief(m.cfg.GroqAPIKey, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, false))
+			}
+		case "I":
+			if m.cfg.GroqAPIKey != "" && m.activeTab == TabLocal {
+				m.loading["localBrief"] = true
+				m.statusMsg = "Forcing fresh local brief (ignoring cache)..."
+				m.statusExpiry = time.Now().Add(3 * time.Second)
+				cmds = append(cmds, fetchLocalBrief(m.cfg.GroqAPIKey, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, true))
 			}
 		case "j", "down":
 			if m.activeTab == TabNews && len(m.globalNews) > 0 {
@@ -466,6 +485,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.localNews = msg.items
 			delete(m.errors, "local")
+			if m.cfg.GroqAPIKey != "" && m.localBrief == nil && m.weatherCond != nil {
+				m.loading["localBrief"] = true
+				cmds = append(cmds, fetchLocalBrief(m.cfg.GroqAPIKey, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, false))
+			}
 		}
 		{
 			content, hdrLines := m.renderLocalContent()
@@ -521,6 +544,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.weatherCond = msg.cond
 			m.forecast = msg.forecast
 			delete(m.errors, "weather")
+			if m.cfg.GroqAPIKey != "" && m.localBrief == nil && len(m.localNews) > 0 {
+				m.loading["localBrief"] = true
+				cmds = append(cmds, fetchLocalBrief(m.cfg.GroqAPIKey, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, false))
+			}
 		}
 		{
 			content, hdrLines := m.renderLocalContent()
@@ -552,6 +579,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			newsContent, hdrLines := m.renderNewsContent()
 			m.newsHeaderLines = hdrLines
 			m.viewports[TabNews].SetContent(newsContent)
+		}
+
+	case localBriefMsg:
+		delete(m.loading, "localBrief")
+		if msg.err != nil {
+			m.errors["localBrief"] = msg.err.Error()
+		} else {
+			m.localBrief = msg.brief
+			delete(m.errors, "localBrief")
+			m.lastRefresh = time.Now()
+			if msg.fromCache {
+				m.statusMsg = "Local brief loaded from cache (" + msg.brief.GeneratedAt.Format("Jan 02 15:04") + ")"
+			} else {
+				go intel.SaveCachedLocalBrief(msg.brief)
+				m.statusMsg = "Local brief generated and cached"
+			}
+			m.statusExpiry = time.Now().Add(4 * time.Second)
+		}
+		{
+			content, hdrLines := m.renderLocalContent()
+			m.localNewsHeaderLines = hdrLines
+			m.viewports[TabLocal].SetContent(content)
 		}
 
 	case openURLMsg:
@@ -635,7 +684,7 @@ func (m Model) renderFooter() string {
 	case TabNews:
 		hint = "  jk navigate  enter open in browser  d/u page  g/G top/bottom  tab switch  r refresh  b brief  q quit"
 	case TabLocal:
-		hint = "  jk navigate  enter open in browser  d/u page  g/G top/bottom  tab switch  r refresh  q quit"
+		hint = "  jk navigate  enter open in browser  d/u page  g/G top/bottom  tab switch  r refresh  i local brief  q quit"
 	default:
 		hint = "  ↑↓/jk scroll  tab/←→ switch  1 overview  2 news  3 local  r refresh  b brief  q quit"
 	}
@@ -1180,6 +1229,59 @@ func (m Model) renderCountryRiskPanel(w int) (string, int) {
 	return sb.String(), strings.Count(sb.String(), "\n")
 }
 
+func (m Model) renderLocalBriefPanel(w int) string {
+	var sb strings.Builder
+
+	sb.WriteString(StyleSectionHeader.Render(" LOCAL BRIEF") + "\n\n")
+
+	if m.cfg.GroqAPIKey == "" {
+		sb.WriteString(StyleWarning.Render("⚠  No GROQ_API_KEY set.\n"))
+		sb.WriteString(StyleMuted.Render("Add key to ~/.config/watchtower/config.yaml\n"))
+		sb.WriteString(StyleMuted.Render("Press [i] after adding key."))
+		return sb.String()
+	}
+
+	if m.loading["localBrief"] {
+		sb.WriteString(m.spinner.View() + " Generating local brief...\n\n")
+		sb.WriteString(StyleMuted.Render("Calling Groq / Llama 3.1..."))
+		return sb.String()
+	}
+
+	if errMsg, ok := m.errors["localBrief"]; ok {
+		sb.WriteString(StyleError.Render("⚠ "+errMsg) + "\n\n")
+		sb.WriteString(StyleMuted.Render("Press [i] to retry."))
+		return sb.String()
+	}
+
+	if m.localBrief == nil {
+		if len(m.localNews) == 0 && m.weatherCond == nil {
+			sb.WriteString(StyleMuted.Render("Waiting for news and weather to load..."))
+		} else {
+			sb.WriteString(StyleMuted.Render("Press [i] to generate local brief."))
+		}
+		return sb.String()
+	}
+
+	b := m.localBrief
+	cacheAge := ""
+	if time.Since(b.GeneratedAt) > time.Minute {
+		mins := int(time.Since(b.GeneratedAt).Minutes())
+		if mins >= 60 {
+			cacheAge = fmt.Sprintf("  (cached %dh%dm ago)", mins/60, mins%60)
+		} else {
+			cacheAge = fmt.Sprintf("  (cached %dm ago)", mins)
+		}
+	}
+	sb.WriteString(StyleBriefMeta.Render(b.GeneratedAt.Format("15:04")+"  "+b.Model+cacheAge) + "\n\n")
+
+	wrapped := wordWrap(b.Summary, w-2)
+	for _, line := range strings.Split(wrapped, "\n") {
+		sb.WriteString(line + "\n")
+	}
+
+	return sb.String()
+}
+
 func (m Model) renderLocalContent() (string, int) {
 	var sb strings.Builder
 
@@ -1214,8 +1316,19 @@ func (m Model) renderLocalContent() (string, int) {
 	// Count header lines from actual rendered content
 	hdrLines := strings.Count(weatherBlock, "\n")
 
+	// Build local brief section
+	localBriefBlock := ""
+	innerW := m.width - 6
+	if innerW < 20 {
+		innerW = 80
+	}
+	localBriefBlock = m.renderLocalBriefPanel(innerW)
+	hdrLines += strings.Count(localBriefBlock, "\n")
+
 	// Local news header section
 	sb.WriteString(weatherBlock)
+	sb.WriteString("\n")
+	sb.WriteString(localBriefBlock)
 	sb.WriteString("\n")
 	localHdr := StyleSectionHeader.Render(" LOCAL NEWS  " + m.cfg.Location.City)
 	sb.WriteString(localHdr + "\n\n")
@@ -1374,6 +1487,37 @@ func loadCachedBrief(cfg *config.Config) tea.Cmd {
 			return nil
 		}
 		return briefMsg{brief: cached, fromCache: true}
+	}
+}
+
+// fetchLocalBrief generates a local brief, using the disk cache unless forceRefresh is true.
+func fetchLocalBrief(apiKey string, city string, items []feeds.NewsItem, cond *weather.Conditions, forecast []weather.DayForecast, cacheMins int, forceRefresh bool) tea.Cmd {
+	return func() tea.Msg {
+		if !forceRefresh && cacheMins > 0 {
+			maxAge := time.Duration(cacheMins) * time.Minute
+			cached, err := intel.LoadCachedLocalBrief(maxAge)
+			if err == nil && cached != nil {
+				return localBriefMsg{brief: cached, fromCache: true}
+			}
+		}
+		b, err := intel.GenerateLocalBrief(context.Background(), apiKey, city, items, cond, forecast)
+		return localBriefMsg{brief: b, err: err, fromCache: false}
+	}
+}
+
+// loadCachedLocalBrief is fired on Init to immediately populate the local brief from
+// disk if a valid cache exists.
+func loadCachedLocalBrief(cfg *config.Config) tea.Cmd {
+	return func() tea.Msg {
+		if cfg.BriefCacheMins == 0 {
+			return nil
+		}
+		maxAge := time.Duration(cfg.BriefCacheMins) * time.Minute
+		cached, err := intel.LoadCachedLocalBrief(maxAge)
+		if err != nil || cached == nil {
+			return nil
+		}
+		return localBriefMsg{brief: cached, fromCache: true}
 	}
 }
 
