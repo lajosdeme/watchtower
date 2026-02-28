@@ -53,8 +53,20 @@ say "Installing ${BINARY} ${VERSION}..."
 EXT="tar.gz"
 [ "$OS" = "windows" ] && EXT="zip"
 
-# Matches GoReleaser's default archive name template
-FILENAME="${BINARY}_${VERSION#v}_${OS}_${ARCH}.${EXT}"
+# Capitalize OS to match GoReleaser name_template
+case "$OS" in
+  linux)  OS_LABEL="Linux" ;;
+  darwin) OS_LABEL="Darwin" ;;
+  windows) OS_LABEL="Windows" ;;
+esac
+
+# Map arch to match GoReleaser name_template
+case "$ARCH" in
+  amd64) ARCH_LABEL="x86_64" ;;
+  arm64) ARCH_LABEL="arm64" ;;
+esac
+
+FILENAME="${BINARY}_${OS_LABEL}_${ARCH_LABEL}.${EXT}"
 URL="https://github.com/${REPO}/releases/download/${VERSION}/${FILENAME}"
 CHECKSUMS_URL="https://github.com/${REPO}/releases/download/${VERSION}/checksums.txt"
 
