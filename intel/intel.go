@@ -201,8 +201,8 @@ func GenerateLocalBrief(ctx context.Context, apiKey string, city string, items [
 	prompt := fmt.Sprintf(`You are a local news and weather analyst. Summarize this information for %s in 2-3 sentences.
 Focus on:
 1. Any notable local news stories
-2. Current weather conditions and how they compare to the forecast
-3. Any weather concerns for the coming days
+2. Current weather conditions and any weather concerns for the coming days
+3. Short summary of the news stories
 
 Respond in this exact format with no extra text:
 
@@ -213,6 +213,7 @@ Rules:
 - Keep it concise and practical
 - No markdown formatting
 - Lead with the most important information
+- Never send back the 'DATA' as is, always explain
 
 DATA:
 %s`, city, sb.String())

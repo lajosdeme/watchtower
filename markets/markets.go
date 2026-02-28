@@ -325,7 +325,7 @@ func FetchCommodities(ctx context.Context) ([]Commodity, error) {
 
 // FetchPredictionMarkets fetches top geopolitical markets from Polymarket
 func FetchPredictionMarkets(ctx context.Context) ([]PredictionMarket, error) {
-	url := "https://gamma-api.polymarket.com/markets?limit=20&active=true&closed=false&order=volume&ascending=false&tag_slug=politics"
+	url := "https://gamma-api.polymarket.com/markets?tag_id=100265&limit=20&closed=false&active=true&order=volume&ascending=false"
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
