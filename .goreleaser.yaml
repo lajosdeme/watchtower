@@ -72,6 +72,7 @@ brews:
     repository:
       owner: lajosdeme
       name: homebrew-watchtower
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     directory: Formula
     homepage: "https://github.com/lajosdeme/watchtower"
     description: "A clean, minimal, terminal-based global intelligence dashboard."
@@ -87,6 +88,7 @@ scoops:
     repository:
       owner: lajosdeme
       name: scoop-watchtower
+      token: "{{ .Env.SCOOP_BUCKET_GITHUB_TOKEN }}"
     directory: bucket
     homepage: "https://github.com/lajosdeme/watchtower"
     description: "A clean, minimal, terminal-based global intelligence dashboard."
