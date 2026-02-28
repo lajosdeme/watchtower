@@ -9,7 +9,9 @@ import (
 )
 
 type Config struct {
-	GroqAPIKey     string   `mapstructure:"groq_api_key"`
+	LLMProvider    string   `mapstructure:"llm_provider"`
+	LLMAPIKey      string   `mapstructure:"llm_api_key"`
+	LLMModel       string   `mapstructure:"llm_model"`
 	Location       Location `mapstructure:"location"`
 	RefreshSec     int      `mapstructure:"refresh_seconds"`
 	CryptoPairs    []string `mapstructure:"crypto_pairs"`
@@ -41,7 +43,7 @@ func Load() (*Config, error) {
 			return nil, fmt.Errorf("writing default config: %w", err)
 		}
 		fmt.Printf("Created default config at %s\n", cfgFile)
-		fmt.Println("Please edit it to add your GROQ_API_KEY and location, then re-run.")
+		fmt.Println("Please edit it to add your LLM_API_KEY and location, then re-run.")
 		os.Exit(0)
 	}
 
@@ -50,7 +52,7 @@ func Load() (*Config, error) {
 	viper.AutomaticEnv()
 
 	// Allow env override for API key
-	viper.BindEnv("groq_api_key", "GROQ_API_KEY")
+	viper.BindEnv("llm_api_key", "LLM_API_KEY")
 
 	if err := viper.ReadInConfig(); err != nil {
 		return nil, fmt.Errorf("reading config: %w", err)
@@ -78,8 +80,20 @@ func Load() (*Config, error) {
 const defaultConfig = `# Watchtower Configuration
 # https://github.com/lajosdeme/watchtower
 
-# Get a free API key at https://console.groq.com
-groq_api_key: ""
+# LLM Provider: groq, openai, deepseek, gemini, claude, local
+llm_provider: "groq"
+
+# API key for your LLM provider (set LLM_API_KEY env var)
+llm_api_key: ""
+
+# Model override (optional, defaults to cheapest per provider)
+# groq: llama-3.1-8b-instant
+# openai: gpt-4o-mini
+# deepseek: deepseek-chat
+# gemini: gemini-1.5-flash
+# claude: claude-3-haiku-20240307
+# local: llama3 (or any model running on your Ollama)
+# llm_model: ""
 
 # Your location for local news and weather
 location:
