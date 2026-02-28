@@ -106,3 +106,93 @@ func ClearBriefCache() error {
 	}
 	return err
 }
+
+// ─── Local Brief Caching ─────────────────────────────────────────────────────
+
+// cachedLocalBrief is the on-disk representation for local brief
+type cachedLocalBrief struct {
+	Summary     string    `json:"summary"`
+	GeneratedAt time.Time `json:"generated_at"`
+	Model       string    `json:"model"`
+}
+
+func localCacheFilePath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	dir := filepath.Join(home, ".cache", "watchtower")
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "local_brief.json"), nil
+}
+
+// LoadCachedLocalBrief reads the cached local brief from disk.
+func LoadCachedLocalBrief(maxAge time.Duration) (*LocalBrief, error) {
+	path, err := localCacheFilePath()
+	if err != nil {
+		return nil, err
+	}
+
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	var cb cachedLocalBrief
+	if err := json.Unmarshal(data, &cb); err != nil {
+		return nil, nil
+	}
+
+	if maxAge > 0 && time.Since(cb.GeneratedAt) > maxAge {
+		return nil, nil
+	}
+
+	return &LocalBrief{
+		Summary:     cb.Summary,
+		GeneratedAt: cb.GeneratedAt,
+		Model:       cb.Model,
+	}, nil
+}
+
+// SaveCachedLocalBrief writes the local brief to disk
+func SaveCachedLocalBrief(b *LocalBrief) {
+	if b == nil {
+		return
+	}
+	path, err := localCacheFilePath()
+	if err != nil {
+		return
+	}
+	cb := cachedLocalBrief{
+		Summary:     b.Summary,
+		GeneratedAt: b.GeneratedAt,
+		Model:       b.Model,
+	}
+	data, err := json.MarshalIndent(cb, "", "  ")
+	if err != nil {
+		return
+	}
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return
+	}
+	_ = os.Rename(tmp, path)
+}
+
+// ClearLocalBriefCache deletes the cached local brief file.
+func ClearLocalBriefCache() error {
+	path, err := localCacheFilePath()
+	if err != nil {
+		return err
+	}
+	err = os.Remove(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
+}
