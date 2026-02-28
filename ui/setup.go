@@ -21,6 +21,15 @@ const (
 
 var providers = []string{"groq", "openai", "deepseek", "gemini", "claude", "local"}
 
+var asciiTitle = ` 888     888          888            888      888                                           
+ 888   o  888          888            888      888                                           
+ 888  d8b  888          888            888      888                                           
+ 888 d888b 888  8888b.  888888 .d8888b 88888b.  888888 .d88b.  888  888  888  .d88b.  888d888 
+ 888d88888b888     "88b 888   d88P"    888 "88b 888   d88""88b 888  888  888 d8P  Y8b 888P"   
+ 88888P Y88888 .d888888 888   888      888  888 888   888  888 888  888  888 88888888 888     
+ 8888P   Y8888 888  888 Y88b. Y88b.    888  888 Y88b. Y88..88P Y88b 888 d88P Y8b.     888     
+ 888P     Y888 "Y888888  "Y888 "Y8888P 888  888  "Y888 "Y88P"   "Y8888888P"   "Y8888  888`
+
 type SetupModel struct {
 	step        int
 	selectedIdx int
@@ -94,6 +103,12 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedIdx = (m.selectedIdx + 1) % len(providers)
 			case tea.KeyEnter:
 				m.step = stepAPIKey
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
 			}
 
 		case stepAPIKey:
@@ -102,6 +117,12 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.apiKeyInput.Value() != "" {
 					m.step = stepLocation
 				}
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
 			default:
 				var cmd tea.Cmd
 				m.apiKeyInput, cmd = m.apiKeyInput.Update(msg)
@@ -115,6 +136,13 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.step = stepSaving
 					m.geocoding = true
 					cmds = append(cmds, m.doGeocode())
+					cmds = append(cmds, func() tea.Msg {
+						return tea.WindowSizeMsg{
+							Width:  m.width,
+							Height: m.height,
+						}
+					})
+
 				}
 			case tea.KeyTab:
 				m.cityInput.Blur()
@@ -173,8 +201,11 @@ func (m SetupModel) View() string {
 	}
 
 	stepIndicator := StyleStepIndicator.Render(fmt.Sprintf("[%d/4]", m.step+1))
-	title := StyleSetupTitle.Render("Watchtower Setup")
-	header := lipgloss.JoinHorizontal(lipgloss.Center, stepIndicator, "  ", title)
+	header := lipgloss.JoinVertical(
+		lipgloss.Center,
+		stepIndicator,
+		StyleSetupTitle.Render("WATCHTOWER"),
+	)
 
 	var content string
 	switch m.step {
@@ -222,7 +253,8 @@ func (m SetupModel) renderProviderStep() string {
 		}
 	}
 
-	content := StylePrompt.Render("Select your preferred LLM:") + "\n\n"
+	content := StyleAccent.Render(asciiTitle) + "\n\n"
+	content += StylePrompt.Render("Select your preferred LLM:") + "\n\n"
 	content += lipgloss.JoinVertical(lipgloss.Left, items...)
 	content += "\n\n" + StyleMuted.Render("Selected: "+StyleAccent.Render(selected))
 
@@ -232,27 +264,29 @@ func (m SetupModel) renderProviderStep() string {
 func (m SetupModel) renderAPIKeyStep() string {
 	selectedProvider := providers[m.selectedIdx]
 
-	prompt := StylePrompt.Render("Selected: "+selectedProvider) + "\n\n"
-	prompt += "Enter your " + StyleAccent.Render(selectedProvider) + " API key:\n\n"
-	prompt += m.apiKeyInput.View() + "\n\n"
-	prompt += StyleHint.Render("Your API key is stored locally and never leaves your machine.")
+	content := StyleAccent.Render(asciiTitle) + "\n\n"
+	content += StylePrompt.Render("Selected: "+selectedProvider) + "\n\n"
+	content += "Enter your " + StyleAccent.Render(selectedProvider) + " API key:\n\n"
+	content += m.apiKeyInput.View() + "\n\n"
+	content += StyleHint.Render("Your API key is stored locally and never leaves your machine.")
 
-	return prompt
+	return content
 }
 
 func (m SetupModel) renderLocationStep() string {
-	prompt := StylePrompt.Render("Enter your location for weather and local news:") + "\n\n"
-	prompt += "  City:          " + m.cityInput.View() + "\n"
-	prompt += "  Country code: " + m.countryInput.View() + "\n\n"
+	content := StyleAccent.Render(asciiTitle) + "\n\n"
+	content += StylePrompt.Render("Enter your location for weather and local news:") + "\n\n"
+	content += "  City:          " + m.cityInput.View() + "\n"
+	content += "  Country code: " + m.countryInput.View() + "\n\n"
 
 	if m.err != "" {
-		prompt += StyleError.Render("Error: "+m.err) + "\n"
-		prompt += StyleHint.Render("Press Enter to go back and try again.")
+		content += StyleError.Render("Error: "+m.err) + "\n"
+		content += StyleHint.Render("Press Enter to go back and try again.")
 	} else {
-		prompt += StyleHint.Render("Example: Lisbon / PT, New York / US, London / GB")
+		content += StyleHint.Render("Example: Lisbon / PT, New York / US, London / GB")
 	}
 
-	return prompt
+	return content
 }
 
 func (m SetupModel) renderSavingStep() string {
