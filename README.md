@@ -17,9 +17,9 @@ The internet has made information abundant—but navigating the noise has become
 | **Global News** | 100+ RSS feeds, keyword threat classification (CRITICAL/HIGH/MEDIUM/LOW/INFO) |
 | **Markets** | Live crypto (CoinGecko) + Polymarket prediction markets + stocks + commodities |
 | **Local** | Open-Meteo weather (free, no key) + geo-targeted local news |
-| **Intel Brief** | Groq Llama 3.1 AI synthesis of top headlines |
+| **Intel Brief** | AI synthesis of top headlines |
 
-All free APIs — only Groq requires a key (free tier is generous).
+All free APIs — only the LLM requires a key (Groq free tier is generous).
 
 ## Install
 Pick the best option depending on your platform.
@@ -79,7 +79,7 @@ go install github.com/lajosdeme/watchtower@latest
 
 On first run, Watchtower will prompt you to configure a few things:
 
-1. **Select LLM provider** — Choose Groq (free), OpenAI, or Anthropic
+1. **Select LLM provider** — Choose Groq (free), OpenAI, Deepseek, Gemini, or Anthropic, or local model
 2. **Paste your API key** — Stored locally in `~/.config/watchtower/config.yaml`, never leaves your device
 3. **Specify your location** — Enter your city and coordinates for local weather and news
 
@@ -111,7 +111,7 @@ That's it! The app saves your settings and you're ready to go.
 | Polymarket | Prediction markets | None (public API) |
 | Yahoo Finance | Stocks & commodities | None |
 | Open-Meteo | Weather | None |
-| Groq / OpenAI / Anthropic | AI brief | Required (free tiers available) |
+| Groq / OpenAI / Anthropic / Deepseek / Gemini / Local | AI brief | Required (free tiers available) |
 
 ## Tech Stack
 
