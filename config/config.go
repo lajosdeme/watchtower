@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"time"
@@ -122,7 +123,7 @@ func Save(cfg *Config) error {
 func Geocode(ctx context.Context, city, countryCode string) (lat, lon float64, err error) {
 	url := fmt.Sprintf(
 		"https://geocoding-api.open-meteo.com/v1/search?name=%s&country=%s&count=1&language=en&format=json",
-		city, countryCode,
+		url.QueryEscape(city), countryCode,
 	)
 
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)

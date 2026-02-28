@@ -1,15 +1,21 @@
-# 🌍 watchtower
+# 🌍 Watchtower
 
 A clean, minimal, terminal-based global intelligence dashboard.
 
 ![wt](https://i.imgur.com/p4BiORi.gif)
+
+## Why Watchtower?
+
+The internet has made information abundant—but navigating the noise has become overwhelming. OSINT tools like WorldMonitor are powerful, but they're designed for intelligence professionals who need every data point. For the average user who just wants to stay informed without drowning in data, there's a gap.
+
+**Watchtower fills that gap.** It lives entirely in your terminal—no browser tabs, no heavy web apps. It's lightweight, fast, and requires only a single API key (and that's optional for the AI brief feature). Just open your terminal and see what's happening in the world.
 
 ## Features
 
 | Tab | Contents |
 |-----|----------|
 | **Global News** | 100+ RSS feeds, keyword threat classification (CRITICAL/HIGH/MEDIUM/LOW/INFO) |
-| **Markets** | Live crypto prices (CoinGecko, free) + Polymarket prediction markets |
+| **Markets** | Live crypto (CoinGecko) + Polymarket prediction markets + stocks + commodities |
 | **Local** | Open-Meteo weather (free, no key) + geo-targeted local news |
 | **Intel Brief** | Groq Llama 3.1 AI synthesis of top headlines |
 
@@ -28,43 +34,41 @@ All free APIs — only Groq requires a key (free tier is generous).
 git clone https://github.com/lajosdeme/watchtower
 cd watchtower
 go mod tidy
-go build -o watchtower ./cmd/watchtower
+go build -o watchtower .
 ./watchtower
 ```
 
-On first run, a default config is created at `~/.config/watchtower/config.yaml`. Edit it:
-
-```yaml
-# Get free key at https://console.groq.com
-groq_api_key: "gsk_YOUR_KEY_HERE"
-
-location:
-  city: "Lisbon"
-  country: "PT"
-  latitude: 38.7169
-  longitude: -9.1395
-
-refresh_seconds: 120
-
-crypto_pairs:
-  - bitcoin
-  - ethereum
-  - solana
-  - binancecoin
-  - ripple
-```
-
-Then run again:
+Or use the Makefile:
 
 ```bash
-./watchtower
+make build
+make run
+```
+
+Or install with Docker:
+
+```bash
+make docker-build
+make docker-run
 ```
 
 ### One-liner install (if Go is in PATH)
 
 ```bash
-go install github.com/lajosdeme/watchtower/cmd/watchtower@latest
+go install github.com/lajosdeme/watchtower@latest
 ```
+
+### Setup
+
+On first run, Watchtower will prompt you to configure a few things:
+
+1. **Select LLM provider** — Choose Groq (free), OpenAI, or Anthropic
+2. **Paste your API key** — Stored locally in `~/.config/watchtower/config.yaml`, never leaves your device
+3. **Specify your location** — Enter your city and coordinates for local weather and news
+
+![setup](https://i.imgur.com/7L4soxv.gif)
+
+That's it! The app saves your settings and you're ready to go.
 
 ## Keybindings
 
@@ -88,8 +92,9 @@ go install github.com/lajosdeme/watchtower/cmd/watchtower@latest
 | Google News | Local news | None (RSS) |
 | CoinGecko | Crypto prices | None (public API) |
 | Polymarket | Prediction markets | None (public API) |
+| Yahoo Finance | Stocks & commodities | None |
 | Open-Meteo | Weather | None |
-| Groq (Llama 3.1 8B) | AI brief | Free at console.groq.com |
+| Groq / OpenAI / Anthropic | AI brief | Required (free tiers available) |
 
 ## Tech Stack
 
@@ -98,32 +103,31 @@ go install github.com/lajosdeme/watchtower/cmd/watchtower@latest
 - **RSS:** [gofeed](https://github.com/mmcdole/gofeed)
 - **Config:** [viper](https://github.com/spf13/viper)
 
-## Extending
+## Contributing
 
-### Add more crypto pairs
+Contributions are welcome! Whether you're adding new features, fixing bugs, or improving documentation:
 
-Edit `~/.config/watchtower/config.yaml` — use any CoinGecko coin ID:
+1. Fork the repo
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-```yaml
-crypto_pairs:
-  - bitcoin
-  - ethereum
-  - dogecoin
-  - chainlink
-```
+Please ensure code is formatted (`go fmt ./`) and passes tests (`go test ./...`) before submitting.
 
-### Add more RSS feeds
+## Supporting Watchtower
 
-Edit `internal/feeds/feeds.go` and add to `GlobalFeeds`:
+If you find Watchtower useful, consider supporting the project:
 
-```go
-{"My Source", "https://example.com/rss.xml"},
-```
-
-### Adjust threat keywords
-
-Edit the `threatKeywords` slice in `internal/feeds/feeds.go`.
+- **Star the repo** — it helps visibility
+- **Share it** — tell friends and colleagues
+- **Contribute** — code, docs, feedback
+- **Report issues** — help make it better
 
 ## License
 
-MIT
+MIT License — see [LICENSE](LICENSE) for details.
+
+## Author
+
+[Lajos Deme](https://github.com/lajosdeme)
