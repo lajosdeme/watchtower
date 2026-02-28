@@ -9,7 +9,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
 func main() {
+	// handle --version / -v
+	if len(os.Args) > 1 && (os.Args[1] == "--version" || os.Args[1] == "-v") {
+		fmt.Printf("watchtower %s (commit: %s, built: %s)\n", version, commit, date)
+		os.Exit(0)
+	}
+
 	if !config.ConfigExists() {
 		runSetup()
 		return

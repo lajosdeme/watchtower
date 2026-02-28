@@ -34,3 +34,5 @@ go.work.sum
 watchtower
 
 AGENTS.md
+# Added by goreleaser init:
+dist/
