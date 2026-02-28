@@ -21,44 +21,61 @@ The internet has made information abundant—but navigating the noise has become
 
 All free APIs — only Groq requires a key (free tier is generous).
 
-## Quick Start
+## Install
+Pick the best option depending on your platform.
 
-### Prerequisites
+### Universal install script
+```
+curl -fsSL https://raw.githubusercontent.com/lajosdeme/watchtower/main/install.sh
+```
 
-- Go 1.22+
-- A terminal that supports 256 colors (most modern terminals do)
+### Homebrew
+```
+brew tap lajosdeme/watchtower
+brew install watchtower
+```
 
-### Install
+### AUR
+```
+yay -S watchtower-bin
+```
 
+### .deb (Ubuntu/Debian)
+```
+# download from the release page, then:
+sudo dpkg -i watchtower_1.0.0_linux_amd64.deb
+watchtower --version
+```
+
+### .rpm (Fedora)
+```
+# download from the release page, then:
+sudo rpm -i watchtower_1.0.0_linux_amd64.rpm
+watchtower --version
+```
+
+### Scoop (Windows)
+```
+scoop bucket add watchtower https://github.com/lajosdeme/scoop-watchtower
+scoop install watchtower
+```
+
+### From source
 ```bash
 git clone https://github.com/lajosdeme/watchtower
 cd watchtower
 go mod tidy
-go build -o watchtower .
-./watchtower
-```
-
-Or use the Makefile:
-
-```bash
-make build
 make run
-```
-
-Or install with Docker:
-
-```bash
-make docker-build
+# or if using docker: 
 make docker-run
 ```
-
-### One-liner install (if Go is in PATH)
+### If Go is in PATH
 
 ```bash
 go install github.com/lajosdeme/watchtower@latest
 ```
 
-### Setup
+## Setup
 
 On first run, Watchtower will prompt you to configure a few things:
 
