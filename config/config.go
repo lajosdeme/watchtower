@@ -1,12 +1,18 @@
 package config
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/spf13/viper"
 )
+
+var httpClient = &http.Client{Timeout: 10 * time.Second}
 
 type Config struct {
 	LLMProvider    string   `mapstructure:"llm_provider"`
@@ -34,17 +40,8 @@ func Load() (*Config, error) {
 	cfgDir := filepath.Join(home, ".config", "watchtower")
 	cfgFile := filepath.Join(cfgDir, "config.yaml")
 
-	// Create default config if missing
-	if _, err := os.Stat(cfgFile); os.IsNotExist(err) {
-		if err := os.MkdirAll(cfgDir, 0755); err != nil {
-			return nil, fmt.Errorf("creating config dir: %w", err)
-		}
-		if err := os.WriteFile(cfgFile, []byte(defaultConfig), 0644); err != nil {
-			return nil, fmt.Errorf("writing default config: %w", err)
-		}
-		fmt.Printf("Created default config at %s\n", cfgFile)
-		fmt.Println("Please edit it to add your LLM_API_KEY and location, then re-run.")
-		os.Exit(0)
+	if !ConfigExists() {
+		return nil, fmt.Errorf("config not found at %s. Please run setup.", cfgFile)
 	}
 
 	viper.SetConfigFile(cfgFile)
@@ -77,42 +74,86 @@ func Load() (*Config, error) {
 	return &cfg, nil
 }
 
-const defaultConfig = `# Watchtower Configuration
-# https://github.com/lajosdeme/watchtower
+func ConfigExists() bool {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	cfgFile := filepath.Join(home, ".config", "watchtower", "config.yaml")
+	_, err = os.Stat(cfgFile)
+	return err == nil
+}
 
-# LLM Provider: groq, openai, deepseek, gemini, claude, local
-llm_provider: "groq"
+func Save(cfg *Config) error {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("getting home dir: %w", err)
+	}
 
-# API key for your LLM provider (set LLM_API_KEY env var)
-llm_api_key: ""
+	cfgDir := filepath.Join(home, ".config", "watchtower")
+	if err := os.MkdirAll(cfgDir, 0755); err != nil {
+		return fmt.Errorf("creating config dir: %w", err)
+	}
 
-# Model override (optional, defaults to cheapest per provider)
-# groq: llama-3.1-8b-instant
-# openai: gpt-4o-mini
-# deepseek: deepseek-chat
-# gemini: gemini-1.5-flash
-# claude: claude-3-haiku-20240307
-# local: llama3 (or any model running on your Ollama)
-# llm_model: ""
+	cfgFile := filepath.Join(cfgDir, "config.yaml")
 
-# Your location for local news and weather
-location:
-  city: "Lisbon"
-  country: "PT"
-  latitude: 38.7169
-  longitude: -9.1395
+	v := viper.New()
+	v.SetConfigFile(cfgFile)
+	v.Set("llm_provider", cfg.LLMProvider)
+	v.Set("llm_api_key", cfg.LLMAPIKey)
+	v.Set("llm_model", cfg.LLMModel)
+	v.Set("location", map[string]interface{}{
+		"city":      cfg.Location.City,
+		"country":   cfg.Location.Country,
+		"latitude":  cfg.Location.Latitude,
+		"longitude": cfg.Location.Longitude,
+	})
+	v.Set("refresh_seconds", cfg.RefreshSec)
+	v.Set("crypto_pairs", cfg.CryptoPairs)
+	v.Set("brief_cache_minutes", cfg.BriefCacheMins)
 
-# How often to refresh data (seconds)
-refresh_seconds: 120
+	if err := v.WriteConfig(); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
 
-# How long to cache the AI brief before regenerating (minutes)
-# Set to 0 to always generate fresh on startup
-brief_cache_minutes: 60
+	return nil
+}
 
-# Crypto pairs to track (CoinGecko IDs)
-crypto_pairs:
-  - bitcoin
-  - ethereum
-  - dogecoin
-  - usd-coin
-`
+func Geocode(ctx context.Context, city, countryCode string) (lat, lon float64, err error) {
+	url := fmt.Sprintf(
+		"https://geocoding-api.open-meteo.com/v1/search?name=%s&country=%s&count=1&language=en&format=json",
+		city, countryCode,
+	)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return 0, 0, fmt.Errorf("creating geocoding request: %w", err)
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return 0, 0, fmt.Errorf("geocoding request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return 0, 0, fmt.Errorf("geocoding API HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Results []struct {
+			Latitude  float64 `json:"latitude"`
+			Longitude float64 `json:"longitude"`
+		} `json:"results"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return 0, 0, fmt.Errorf("decoding geocoding response: %w", err)
+	}
+
+	if len(result.Results) == 0 {
+		return 0, 0, fmt.Errorf("city not found: %s, %s", city, countryCode)
+	}
+
+	return result.Results[0].Latitude, result.Results[0].Longitude, nil
+}
