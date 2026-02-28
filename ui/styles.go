@@ -189,4 +189,40 @@ var (
 
 	StyleWeatherDesc = lipgloss.NewStyle().
 				Foreground(colorAccent)
+
+	// Setup wizard
+	StyleStepIndicator = lipgloss.NewStyle().
+				Foreground(colorMuted).
+				Bold(true)
+
+	StyleSetupTitle = lipgloss.NewStyle().
+			Foreground(colorAccent).
+			Bold(true)
+
+	StyleSetupPane = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorBorder).
+			Padding(1, 2)
+
+	StyleSetupBox = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorBorder).
+			Padding(1, 2)
+
+	StyleSelectedItem = lipgloss.NewStyle().
+				Foreground(colorAccent).
+				Bold(true)
+
+	StyleAccent = lipgloss.NewStyle().
+			Foreground(colorAccent)
+
+	StylePrompt = lipgloss.NewStyle().
+			Foreground(colorWhite)
+
+	StyleHint = lipgloss.NewStyle().
+			Foreground(colorMuted)
+
+	StyleSuccess = lipgloss.NewStyle().
+			Foreground(colorGreen).
+			Bold(true)
 )
