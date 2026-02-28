@@ -45,10 +45,7 @@ var (
 
 	StyleActiveTab = lipgloss.NewStyle().
 			Foreground(colorAccent).
-			Bold(true).
-			BorderBottom(true).
-			BorderStyle(lipgloss.NormalBorder()).
-			BorderForeground(colorAccent)
+			Bold(true)
 
 	StyleInactiveTab = lipgloss.NewStyle().
 				Foreground(colorMuted)
