@@ -28,7 +28,7 @@ builds:
 
 archives:
   - id: watchtower
-  - formats: [tar.gz]
+    formats: [tar.gz]
     # this name template makes the OS and Arch compatible with the results of `uname`.
     name_template: >-
       {{ .ProjectName }}_
@@ -67,6 +67,8 @@ release:
 
 brews:
   - name: watchtower
+    ids:
+      - watchtower
     repository:
       owner: lajosdeme
       name: homebrew-watchtower
@@ -80,7 +82,9 @@ brews:
       bin.install "watchtower"
   
 scoops:
-  - repository:
+  - ids:
+      - watchtower
+    repository:
       owner: lajosdeme
       name: scoop-watchtower
     directory: bucket
@@ -99,19 +103,6 @@ nfpms:
       - deb
       - rpm
       - apk
-    contents:
-      - src: ./completions/watchtower.bash
-        dst: /usr/share/bash-completion/completions/watchtower
-        file_info:
-          mode: 0644
-      - src: ./completions/watchtower.zsh
-        dst: /usr/share/zsh/vendor-completions/_watchtower
-        file_info:
-          mode: 0644
-      - src: ./completions/watchtower.fish
-        dst: /usr/share/fish/vendor_completions.d/watchtower.fish
-        file_info:
-          mode: 0644
 
 aurs:
   - name: watchtower-bin
@@ -129,19 +120,3 @@ aurs:
       - watchtower
     package: |-
       install -Dm755 "./watchtower" "${pkgdir}/usr/bin/watchtower"
-      install -Dm644 "./completions/watchtower.bash" \
-        "${pkgdir}/usr/share/bash-completion/completions/watchtower"
-      install -Dm644 "./completions/watchtower.zsh" \
-        "${pkgdir}/usr/share/zsh/vendor-completions/_watchtower"
-      install -Dm644 "./completions/watchtower.fish" \
-        "${pkgdir}/usr/share/fish/vendor_completions.d/watchtower.fish"
-  
-dockers:
-  - image_templates:
-    - "lajosdeme/watchtower:{{ .Version }}"
-    - "lajosdeme/watchtower:latest"
-    - "ghcr.io/lajosdeme/watchtower:{{ .Version }}"
-    - "ghcr.io/lajosdeme/watchtower:latest"
-    build_flag_templates:
-      - "--label=org.opencontainers.image.version={{.Version}}"
-    dockerfile: Dockerfile.goreleaser
