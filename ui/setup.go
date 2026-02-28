@@ -222,7 +222,8 @@ func (m SetupModel) renderProviderStep() string {
 		}
 	}
 
-	content := lipgloss.JoinVertical(lipgloss.Left, items...)
+	content := StylePrompt.Render("Select your preferred LLM:") + "\n\n"
+	content += lipgloss.JoinVertical(lipgloss.Left, items...)
 	content += "\n\n" + StyleMuted.Render("Selected: "+StyleAccent.Render(selected))
 
 	return content
