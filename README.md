@@ -1,28 +1,8 @@
 # 🌍 watchtower
 
-A terminal-based global intelligence dashboard inspired by [worldmonitor.app](https://worldmonitor.app).
+A clean, minimal, terminal-based global intelligence dashboard.
 
-```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│ 🌍 watchtower   real-time intelligence  ⠿ refreshing...                        │
-├──────────────────────────────────────────────────────────────────────────────┤
-│  [ 1 Global News ]   2 Markets    3 Local    4 Intel Brief                   │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                               │
-│  GLOBAL NEWS  (42 items)                                                      │
-│                                                                               │
-│  CRITICAL  Reuters   2m ago                                                   │
-│    Airstrike hits capital amid escalating conflict                            │
-│                                                                               │
-│  HIGH      BBC       15m ago                                                  │
-│    NATO troops deployed to eastern flank amid tensions                        │
-│                                                                               │
-│  MEDIUM    AP News   1h ago                                                   │
-│    Emergency summit called as diplomatic crisis deepens                       │
-│                                                                               │
-└──────────────────────────────────────────────────────────────────────────────┘
-│  ↑↓/jk scroll  tab/← → switch pane  r refresh  b gen brief  q quit          │
-```
+![wt](https://github.com/user-attachments/assets/635aa9cb-2603-4654-9f55-68b73d8ea4d0)
 
 ## Features
 
