@@ -205,28 +205,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastRefresh = time.Time{}
 			cmds = append(cmds, doRefreshAll(m.cfg))
 		case "b":
-			if m.cfg.GroqAPIKey != "" {
+			if m.cfg.LLMAPIKey != "" {
 				m.loading["brief"] = true
-				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews, m.cfg.BriefCacheMins, false))
+				cmds = append(cmds, fetchBrief(intel.LLMConfig{Provider: intel.Provider(m.cfg.LLMProvider), APIKey: m.cfg.LLMAPIKey, Model: m.cfg.LLMModel}, m.globalNews, m.cfg.BriefCacheMins, false))
 			}
 		case "B":
-			if m.cfg.GroqAPIKey != "" {
+			if m.cfg.LLMAPIKey != "" {
 				m.loading["brief"] = true
 				m.statusMsg = "Forcing fresh brief (ignoring cache)..."
 				m.statusExpiry = time.Now().Add(3 * time.Second)
-				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews, m.cfg.BriefCacheMins, true))
+				cmds = append(cmds, fetchBrief(intel.LLMConfig{Provider: intel.Provider(m.cfg.LLMProvider), APIKey: m.cfg.LLMAPIKey, Model: m.cfg.LLMModel}, m.globalNews, m.cfg.BriefCacheMins, true))
 			}
 		case "i":
-			if m.cfg.GroqAPIKey != "" && m.activeTab == TabLocal {
+			if m.cfg.LLMAPIKey != "" && m.activeTab == TabLocal {
 				m.loading["localBrief"] = true
-				cmds = append(cmds, fetchLocalBrief(m.cfg.GroqAPIKey, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, false))
+				cmds = append(cmds, fetchLocalBrief(intel.LLMConfig{Provider: intel.Provider(m.cfg.LLMProvider), APIKey: m.cfg.LLMAPIKey, Model: m.cfg.LLMModel}, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, false))
 			}
 		case "I":
-			if m.cfg.GroqAPIKey != "" && m.activeTab == TabLocal {
+			if m.cfg.LLMAPIKey != "" && m.activeTab == TabLocal {
 				m.loading["localBrief"] = true
 				m.statusMsg = "Forcing fresh local brief (ignoring cache)..."
 				m.statusExpiry = time.Now().Add(3 * time.Second)
-				cmds = append(cmds, fetchLocalBrief(m.cfg.GroqAPIKey, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, true))
+				cmds = append(cmds, fetchLocalBrief(intel.LLMConfig{Provider: intel.Provider(m.cfg.LLMProvider), APIKey: m.cfg.LLMAPIKey, Model: m.cfg.LLMModel}, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, true))
 			}
 		case "j", "down":
 			if m.activeTab == TabNews && len(m.globalNews) > 0 {
@@ -466,9 +466,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.globalNews = msg.items
 			delete(m.errors, "global")
-			if m.cfg.GroqAPIKey != "" && m.brief == nil {
+			if m.cfg.LLMAPIKey != "" && m.brief == nil {
 				m.loading["brief"] = true
-				cmds = append(cmds, fetchBrief(m.cfg.GroqAPIKey, m.globalNews, m.cfg.BriefCacheMins, false))
+				cmds = append(cmds, fetchBrief(intel.LLMConfig{Provider: intel.Provider(m.cfg.LLMProvider), APIKey: m.cfg.LLMAPIKey, Model: m.cfg.LLMModel}, m.globalNews, m.cfg.BriefCacheMins, false))
 			}
 		}
 		{
@@ -485,9 +485,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.localNews = msg.items
 			delete(m.errors, "local")
-			if m.cfg.GroqAPIKey != "" && m.localBrief == nil && m.weatherCond != nil {
+			if m.cfg.LLMAPIKey != "" && m.localBrief == nil && m.weatherCond != nil {
 				m.loading["localBrief"] = true
-				cmds = append(cmds, fetchLocalBrief(m.cfg.GroqAPIKey, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, false))
+				cmds = append(cmds, fetchLocalBrief(intel.LLMConfig{Provider: intel.Provider(m.cfg.LLMProvider), APIKey: m.cfg.LLMAPIKey, Model: m.cfg.LLMModel}, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, false))
 			}
 		}
 		{
@@ -544,9 +544,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.weatherCond = msg.cond
 			m.forecast = msg.forecast
 			delete(m.errors, "weather")
-			if m.cfg.GroqAPIKey != "" && m.localBrief == nil && len(m.localNews) > 0 {
+			if m.cfg.LLMAPIKey != "" && m.localBrief == nil && len(m.localNews) > 0 {
 				m.loading["localBrief"] = true
-				cmds = append(cmds, fetchLocalBrief(m.cfg.GroqAPIKey, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, false))
+				cmds = append(cmds, fetchLocalBrief(intel.LLMConfig{Provider: intel.Provider(m.cfg.LLMProvider), APIKey: m.cfg.LLMAPIKey, Model: m.cfg.LLMModel}, m.cfg.Location.City, m.localNews, m.weatherCond, m.forecast, m.cfg.BriefCacheMins, false))
 			}
 		}
 		{
@@ -792,15 +792,15 @@ func (m Model) renderWeatherPanel(w, h int) string {
 func (m Model) renderBriefPanel(w, h int) string {
 	var sb strings.Builder
 
-	if m.cfg.GroqAPIKey == "" {
-		sb.WriteString(StyleWarning.Render("⚠  No GROQ_API_KEY set.\n\n"))
-		sb.WriteString(StyleMuted.Render("Add key to:\n~/.config/watchtower/config.yaml\n\nGet free key:\nconsole.groq.com\n\nPress [b] after adding key."))
+	if m.cfg.LLMAPIKey == "" {
+		sb.WriteString(StyleWarning.Render("⚠  No LLM_API_KEY set.\n\n"))
+		sb.WriteString(StyleMuted.Render("Add key to:\n~/.config/watchtower/config.yaml\n\nSet llm_provider and llm_api_key.\n\nPress [b] after adding key."))
 		return sb.String()
 	}
 
 	if m.loading["brief"] {
 		sb.WriteString(m.spinner.View() + " Generating brief...\n\n")
-		sb.WriteString(StyleMuted.Render("Calling Groq / Llama 3.1..."))
+		sb.WriteString(StyleMuted.Render("Calling " + m.cfg.LLMProvider + "..."))
 		return sb.String()
 	}
 
@@ -1234,8 +1234,8 @@ func (m Model) renderLocalBriefPanel(w int) string {
 
 	sb.WriteString(StyleSectionHeader.Render(" LOCAL BRIEF") + "\n\n")
 
-	if m.cfg.GroqAPIKey == "" {
-		sb.WriteString(StyleWarning.Render("⚠  No GROQ_API_KEY set.\n"))
+	if m.cfg.LLMAPIKey == "" {
+		sb.WriteString(StyleWarning.Render("⚠  No LLM_API_KEY set.\n"))
 		sb.WriteString(StyleMuted.Render("Add key to ~/.config/watchtower/config.yaml\n"))
 		sb.WriteString(StyleMuted.Render("Press [i] after adding key."))
 		return sb.String()
@@ -1243,7 +1243,7 @@ func (m Model) renderLocalBriefPanel(w int) string {
 
 	if m.loading["localBrief"] {
 		sb.WriteString(m.spinner.View() + " Generating local brief...\n\n")
-		sb.WriteString(StyleMuted.Render("Calling Groq / Llama 3.1..."))
+		sb.WriteString(StyleMuted.Render("Calling " + m.cfg.LLMProvider + "..."))
 		return sb.String()
 	}
 
@@ -1458,7 +1458,7 @@ func fetchWeather(lat, lon float64, city string) tea.Cmd {
 
 // fetchBrief generates a brief, using the disk cache unless forceRefresh is true.
 // cacheMins=0 means always generate fresh (cache disabled).
-func fetchBrief(apiKey string, items []feeds.NewsItem, cacheMins int, forceRefresh bool) tea.Cmd {
+func fetchBrief(cfg intel.LLMConfig, items []feeds.NewsItem, cacheMins int, forceRefresh bool) tea.Cmd {
 	return func() tea.Msg {
 		// Try cache first (unless forced refresh or cache disabled)
 		if !forceRefresh && cacheMins > 0 {
@@ -1468,8 +1468,8 @@ func fetchBrief(apiKey string, items []feeds.NewsItem, cacheMins int, forceRefre
 				return briefMsg{brief: cached, fromCache: true}
 			}
 		}
-		// Cache miss or disabled — call Groq
-		b, err := intel.GenerateBrief(context.Background(), apiKey, items)
+		// Cache miss or disabled — call LLM
+		b, err := intel.GenerateBrief(context.Background(), cfg, items)
 		return briefMsg{brief: b, err: err, fromCache: false}
 	}
 }
@@ -1491,7 +1491,7 @@ func loadCachedBrief(cfg *config.Config) tea.Cmd {
 }
 
 // fetchLocalBrief generates a local brief, using the disk cache unless forceRefresh is true.
-func fetchLocalBrief(apiKey string, city string, items []feeds.NewsItem, cond *weather.Conditions, forecast []weather.DayForecast, cacheMins int, forceRefresh bool) tea.Cmd {
+func fetchLocalBrief(cfg intel.LLMConfig, city string, items []feeds.NewsItem, cond *weather.Conditions, forecast []weather.DayForecast, cacheMins int, forceRefresh bool) tea.Cmd {
 	return func() tea.Msg {
 		if !forceRefresh && cacheMins > 0 {
 			maxAge := time.Duration(cacheMins) * time.Minute
@@ -1500,7 +1500,7 @@ func fetchLocalBrief(apiKey string, city string, items []feeds.NewsItem, cond *w
 				return localBriefMsg{brief: cached, fromCache: true}
 			}
 		}
-		b, err := intel.GenerateLocalBrief(context.Background(), apiKey, city, items, cond, forecast)
+		b, err := intel.GenerateLocalBrief(context.Background(), cfg, city, items, cond, forecast)
 		return localBriefMsg{brief: b, err: err, fromCache: false}
 	}
 }

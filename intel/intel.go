@@ -13,6 +13,94 @@ import (
 	"watchtower/weather"
 )
 
+type Provider string
+
+const (
+	ProviderGroq     Provider = "groq"
+	ProviderOpenAI   Provider = "openai"
+	ProviderDeepSeek Provider = "deepseek"
+	ProviderGemini   Provider = "gemini"
+	ProviderClaude   Provider = "claude"
+	ProviderLocal    Provider = "local"
+)
+
+var providerDefaults = map[Provider]struct {
+	endpoint     string
+	defaultModel string
+	authHeader   string
+	authPrefix   string
+}{
+	ProviderGroq: {
+		endpoint:     "https://api.groq.com/openai/v1/chat/completions",
+		defaultModel: "llama-3.1-8b-instant",
+		authHeader:   "Authorization",
+		authPrefix:   "Bearer ",
+	},
+	ProviderOpenAI: {
+		endpoint:     "https://api.openai.com/v1/chat/completions",
+		defaultModel: "gpt-4o-mini",
+		authHeader:   "Authorization",
+		authPrefix:   "Bearer ",
+	},
+	ProviderDeepSeek: {
+		endpoint:     "https://api.deepseek.com/v1/chat/completions",
+		defaultModel: "deepseek-chat",
+		authHeader:   "Authorization",
+		authPrefix:   "Bearer ",
+	},
+	ProviderGemini: {
+		endpoint:     "https://generativelanguage.googleapis.com/v1beta/models",
+		defaultModel: "gemini-1.5-flash",
+		authHeader:   "X-Goog-Api-Key",
+		authPrefix:   "",
+	},
+	ProviderClaude: {
+		endpoint:     "https://api.anthropic.com/v1/messages",
+		defaultModel: "claude-3-haiku-20240307",
+		authHeader:   "x-api-key",
+		authPrefix:   "",
+	},
+	ProviderLocal: {
+		endpoint:     "http://localhost:11434/v1/chat/completions",
+		defaultModel: "llama3",
+		authHeader:   "Authorization",
+		authPrefix:   "Bearer ",
+	},
+}
+
+type LLMConfig struct {
+	Provider Provider
+	APIKey   string
+	Model    string
+}
+
+func (c LLMConfig) Endpoint() string {
+	p := providerDefaults[c.Provider]
+	if c.Model == "" {
+		return p.endpoint
+	}
+	if c.Provider == ProviderGemini {
+		return p.endpoint + "/" + c.Model + ":generateContent"
+	}
+	return p.endpoint
+}
+
+func (c LLMConfig) ModelName() string {
+	if c.Model != "" {
+		return c.Model
+	}
+	return providerDefaults[c.Provider].defaultModel
+}
+
+func (c LLMConfig) AuthHeader() string {
+	return providerDefaults[c.Provider].authHeader
+}
+
+func (c LLMConfig) AuthValue() string {
+	p := providerDefaults[c.Provider]
+	return p.authPrefix + c.APIKey
+}
+
 // CountryRisk holds a risk score for one country
 type CountryRisk struct {
 	Country string
@@ -38,11 +126,11 @@ type LocalBrief struct {
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
-// GenerateBrief calls Groq to synthesize a brief, summary, and country risk scores
-func GenerateBrief(ctx context.Context, apiKey string, items []feeds.NewsItem) (*Brief, error) {
-	if apiKey == "" {
+// GenerateBrief calls the configured LLM to synthesize a brief, summary, and country risk scores
+func GenerateBrief(ctx context.Context, cfg LLMConfig, items []feeds.NewsItem) (*Brief, error) {
+	if cfg.APIKey == "" {
 		return &Brief{
-			Summary:     "No GROQ_API_KEY set. Add it to ~/.config/watchtower/config.yaml to enable AI briefings.",
+			Summary:     "No LLM_API_KEY set. Add it to ~/.config/watchtower/config.yaml to enable AI briefings.",
 			GeneratedAt: time.Now(),
 			Model:       "none",
 		}, nil
@@ -97,71 +185,20 @@ Rules:
 HEADLINES:
 %s`, sb.String())
 
-	body := map[string]interface{}{
-		"model":       "llama-3.1-8b-instant",
-		"temperature": 0,
-		"max_tokens":  700,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
+	if cfg.Provider == ProviderClaude {
+		return generateClaudeBrief(ctx, cfg, prompt)
 	}
-
-	bodyBytes, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
+	if cfg.Provider == ProviderGemini {
+		return generateGeminiBrief(ctx, cfg, prompt)
 	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST",
-		"https://api.groq.com/openai/v1/chat/completions",
-		bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("groq request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("groq HTTP %d", resp.StatusCode)
-	}
-
-	var result struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-		Model string `json:"model"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding groq response: %w", err)
-	}
-	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("no response from groq")
-	}
-
-	summary, threats, risks := parseBriefResponse(result.Choices[0].Message.Content)
-
-	return &Brief{
-		Summary:      summary,
-		KeyThreats:   threats,
-		CountryRisks: risks,
-		GeneratedAt:  time.Now(),
-		Model:        result.Model,
-	}, nil
+	return generateOpenAICompatibleBrief(ctx, cfg, prompt)
 }
 
-// GenerateLocalBrief calls Groq to synthesize a local news and weather summary
-func GenerateLocalBrief(ctx context.Context, apiKey string, city string, items []feeds.NewsItem, cond *weather.Conditions, forecast []weather.DayForecast) (*LocalBrief, error) {
-	if apiKey == "" {
+// GenerateLocalBrief calls the configured LLM to synthesize a local news and weather summary
+func GenerateLocalBrief(ctx context.Context, cfg LLMConfig, city string, items []feeds.NewsItem, cond *weather.Conditions, forecast []weather.DayForecast) (*LocalBrief, error) {
+	if cfg.APIKey == "" {
 		return &LocalBrief{
-			Summary:     "No GROQ_API_KEY set. Add it to ~/.config/watchtower/config.yaml to enable AI briefings.",
+			Summary:     "No LLM_API_KEY set. Add it to ~/.config/watchtower/config.yaml to enable AI briefings.",
 			GeneratedAt: time.Now(),
 			Model:       "none",
 		}, nil
@@ -218,10 +255,20 @@ Rules:
 DATA:
 %s`, city, sb.String())
 
+	if cfg.Provider == ProviderClaude {
+		return generateClaudeLocalBrief(ctx, cfg, prompt)
+	}
+	if cfg.Provider == ProviderGemini {
+		return generateGeminiLocalBrief(ctx, cfg, prompt)
+	}
+	return generateOpenAICompatibleLocalBrief(ctx, cfg, prompt)
+}
+
+func generateOpenAICompatibleBrief(ctx context.Context, cfg LLMConfig, prompt string) (*Brief, error) {
 	body := map[string]interface{}{
-		"model":       "llama-3.1-8b-instant",
+		"model":       cfg.ModelName(),
 		"temperature": 0,
-		"max_tokens":  300,
+		"max_tokens":  700,
 		"messages": []map[string]string{
 			{"role": "user", "content": prompt},
 		},
@@ -232,23 +279,21 @@ DATA:
 		return nil, err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST",
-		"https://api.groq.com/openai/v1/chat/completions",
-		bytes.NewReader(bodyBytes))
+	req, err := http.NewRequestWithContext(ctx, "POST", cfg.Endpoint(), bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set(cfg.AuthHeader(), cfg.AuthValue())
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("groq request failed: %w", err)
+		return nil, fmt.Errorf("%s request failed: %w", cfg.Provider, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		return nil, fmt.Errorf("groq HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("%s HTTP %d", cfg.Provider, resp.StatusCode)
 	}
 
 	var result struct {
@@ -261,10 +306,69 @@ DATA:
 	}
 
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return nil, fmt.Errorf("decoding groq response: %w", err)
+		return nil, fmt.Errorf("decoding %s response: %w", cfg.Provider, err)
 	}
 	if len(result.Choices) == 0 {
-		return nil, fmt.Errorf("no response from groq")
+		return nil, fmt.Errorf("no response from %s", cfg.Provider)
+	}
+
+	summary, threats, risks := parseBriefResponse(result.Choices[0].Message.Content)
+
+	return &Brief{
+		Summary:      summary,
+		KeyThreats:   threats,
+		CountryRisks: risks,
+		GeneratedAt:  time.Now(),
+		Model:        result.Model,
+	}, nil
+}
+
+func generateOpenAICompatibleLocalBrief(ctx context.Context, cfg LLMConfig, prompt string) (*LocalBrief, error) {
+	body := map[string]interface{}{
+		"model":       cfg.ModelName(),
+		"temperature": 0,
+		"max_tokens":  300,
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+	}
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cfg.Endpoint(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(cfg.AuthHeader(), cfg.AuthValue())
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("%s request failed: %w", cfg.Provider, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("%s HTTP %d", cfg.Provider, resp.StatusCode)
+	}
+
+	var result struct {
+		Choices []struct {
+			Message struct {
+				Content string `json:"content"`
+			} `json:"message"`
+		} `json:"choices"`
+		Model string `json:"model"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding %s response: %w", cfg.Provider, err)
+	}
+	if len(result.Choices) == 0 {
+		return nil, fmt.Errorf("no response from %s", cfg.Provider)
 	}
 
 	summary := parseLocalBriefResponse(result.Choices[0].Message.Content)
@@ -273,6 +377,248 @@ DATA:
 		Summary:     summary,
 		GeneratedAt: time.Now(),
 		Model:       result.Model,
+	}, nil
+}
+
+func generateClaudeBrief(ctx context.Context, cfg LLMConfig, prompt string) (*Brief, error) {
+	body := map[string]interface{}{
+		"model":       cfg.ModelName(),
+		"max_tokens":  700,
+		"temperature": 0,
+		"system":      "You are a geopolitical intelligence analyst.",
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+	}
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cfg.Endpoint(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(cfg.AuthHeader(), cfg.AuthValue())
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("claude request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("claude HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding claude response: %w", err)
+	}
+	if len(result.Content) == 0 {
+		return nil, fmt.Errorf("no response from claude")
+	}
+
+	summary, threats, risks := parseBriefResponse(result.Content[0].Text)
+
+	return &Brief{
+		Summary:      summary,
+		KeyThreats:   threats,
+		CountryRisks: risks,
+		GeneratedAt:  time.Now(),
+		Model:        cfg.ModelName(),
+	}, nil
+}
+
+func generateClaudeLocalBrief(ctx context.Context, cfg LLMConfig, prompt string) (*LocalBrief, error) {
+	body := map[string]interface{}{
+		"model":       cfg.ModelName(),
+		"max_tokens":  300,
+		"temperature": 0,
+		"system":      "You are a local news and weather analyst.",
+		"messages": []map[string]string{
+			{"role": "user", "content": prompt},
+		},
+	}
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cfg.Endpoint(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(cfg.AuthHeader(), cfg.AuthValue())
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("anthropic-version", "2023-06-01")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("claude request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("claude HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Content []struct {
+			Text string `json:"text"`
+		} `json:"content"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding claude response: %w", err)
+	}
+	if len(result.Content) == 0 {
+		return nil, fmt.Errorf("no response from claude")
+	}
+
+	summary := parseLocalBriefResponse(result.Content[0].Text)
+
+	return &LocalBrief{
+		Summary:     summary,
+		GeneratedAt: time.Now(),
+		Model:       cfg.ModelName(),
+	}, nil
+}
+
+func generateGeminiBrief(ctx context.Context, cfg LLMConfig, prompt string) (*Brief, error) {
+	body := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]string{
+					{"text": prompt},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature":     0,
+			"maxOutputTokens": 700,
+		},
+	}
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cfg.Endpoint(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(cfg.AuthHeader(), cfg.AuthValue())
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("gemini request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("gemini HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding gemini response: %w", err)
+	}
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("no response from gemini")
+	}
+
+	summary, threats, risks := parseBriefResponse(result.Candidates[0].Content.Parts[0].Text)
+
+	return &Brief{
+		Summary:      summary,
+		KeyThreats:   threats,
+		CountryRisks: risks,
+		GeneratedAt:  time.Now(),
+		Model:        cfg.ModelName(),
+	}, nil
+}
+
+func generateGeminiLocalBrief(ctx context.Context, cfg LLMConfig, prompt string) (*LocalBrief, error) {
+	body := map[string]interface{}{
+		"contents": []map[string]interface{}{
+			{
+				"parts": []map[string]string{
+					{"text": prompt},
+				},
+			},
+		},
+		"generationConfig": map[string]interface{}{
+			"temperature":     0,
+			"maxOutputTokens": 300,
+		},
+	}
+
+	bodyBytes, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "POST", cfg.Endpoint(), bytes.NewReader(bodyBytes))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set(cfg.AuthHeader(), cfg.AuthValue())
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("gemini request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("gemini HTTP %d", resp.StatusCode)
+	}
+
+	var result struct {
+		Candidates []struct {
+			Content struct {
+				Parts []struct {
+					Text string `json:"text"`
+				} `json:"parts"`
+			} `json:"content"`
+		} `json:"candidates"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decoding gemini response: %w", err)
+	}
+	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
+		return nil, fmt.Errorf("no response from gemini")
+	}
+
+	summary := parseLocalBriefResponse(result.Candidates[0].Content.Parts[0].Text)
+
+	return &LocalBrief{
+		Summary:     summary,
+		GeneratedAt: time.Now(),
+		Model:       cfg.ModelName(),
 	}, nil
 }
 
