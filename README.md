@@ -2,7 +2,7 @@
 
 A clean, minimal, terminal-based global intelligence dashboard.
 
-![wt](https://github.com/user-attachments/assets/635aa9cb-2603-4654-9f55-68b73d8ea4d0)
+![wt](https://i.imgur.com/p4BiORi.gif)
 
 ## Features
 
