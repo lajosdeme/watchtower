@@ -756,9 +756,9 @@ func (m Model) renderWeatherPanel(w, h int) string {
 	wc := m.weatherCond
 	// Large icon + temp on first line
 	sb.WriteString(fmt.Sprintf("%s  %s\n", wc.Icon,
-		StyleWeatherTemp.Render(fmt.Sprintf("%.1f°C", wc.TempC))))
+		StyleWeatherTemp.Render(m.formatTemp(wc.TempC))))
 	sb.WriteString(StyleWeatherDesc.Render(wc.Description) + "\n")
-	sb.WriteString(StyleAge.Render(fmt.Sprintf("Feels like %.1f°C", wc.FeelsLikeC)) + "\n\n")
+	sb.WriteString(StyleAge.Render(fmt.Sprintf("Feels like %s", m.formatTemp(wc.FeelsLikeC))) + "\n\n")
 	sb.WriteString(fmt.Sprintf("💧 %d%%   💨 %.0f km/h %s   ☀ UV %.0f\n",
 		wc.Humidity, wc.WindSpeedKmh,
 		weather.WindDirectionStr(wc.WindDirection), wc.UVIndex))
@@ -781,8 +781,8 @@ func (m Model) renderWeatherPanel(w, h int) string {
 			if i == 0 {
 				dayLabel = "Today     "
 			}
-			sb.WriteString(fmt.Sprintf("%-10s  %s  %4.0f° %4.0f° %3.0fmm\n",
-				dayLabel, f.Icon, f.MaxTempC, f.MinTempC, f.RainMM))
+			sb.WriteString(fmt.Sprintf("%-10s  %s  %4s %4s %3.0fmm\n",
+				dayLabel, f.Icon, m.formatTemp(f.MaxTempC), m.formatTemp(f.MinTempC), f.RainMM))
 		}
 	}
 
@@ -1290,8 +1290,8 @@ func (m Model) renderLocalContent() (string, int) {
 	if m.weatherCond != nil {
 		wc := m.weatherCond
 		weatherBlock += StyleSectionHeader.Render(" WEATHER  "+wc.City) + "\n\n"
-		weatherBlock += fmt.Sprintf("  %s  %s  %.1f°C  (feels like %.1f°C)\n",
-			wc.Icon, wc.Description, wc.TempC, wc.FeelsLikeC)
+		weatherBlock += fmt.Sprintf("  %s  %s  %s  (feels like %s)\n",
+			wc.Icon, wc.Description, m.formatTemp(wc.TempC), m.formatTemp(wc.FeelsLikeC))
 		weatherBlock += fmt.Sprintf("  💧 Humidity: %d%%   💨 Wind: %.0f km/h %s   👁 Visibility: %.0f km   ☀ UV: %.0f\n\n",
 			wc.Humidity, wc.WindSpeedKmh,
 			weather.WindDirectionStr(wc.WindDirection),
@@ -1301,9 +1301,9 @@ func (m Model) renderLocalContent() (string, int) {
 				fmt.Sprintf("  %-12s %-16s %8s %8s %10s", "DATE", "CONDITION", "MAX", "MIN", "RAIN")) + "\n"
 			weatherBlock += StyleDivider.Render(strings.Repeat("─", 60)) + "\n"
 			for _, f := range m.forecast {
-				weatherBlock += fmt.Sprintf("  %-12s %s %-12s %6.1f°C %6.1f°C %7.1fmm\n",
+				weatherBlock += fmt.Sprintf("  %-12s %s %-12s %6s %6s %7.1fmm\n",
 					f.Date.Format("Mon Jan 02"), f.Icon, f.Desc,
-					f.MaxTempC, f.MinTempC, f.RainMM)
+					m.formatTemp(f.MaxTempC), m.formatTemp(f.MinTempC), f.RainMM)
 			}
 			weatherBlock += "\n"
 		}
@@ -1632,6 +1632,15 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
+}
+
+func (m Model) formatTemp(celsius float64) string {
+	unit := "C"
+	if m.cfg.TempUnit == "fahrenheit" {
+		celsius = celsius*9/5 + 32
+		unit = "F"
+	}
+	return fmt.Sprintf("%.1f°%s", celsius, unit)
 }
 
 // isCommandAvailable checks if a command exists on PATH

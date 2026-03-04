@@ -15,11 +15,14 @@ const (
 	stepSelectProvider = iota
 	stepAPIKey
 	stepLocation
+	stepTempUnit
 	stepSaving
 	stepDone
 )
 
 var providers = []string{"groq", "openai", "deepseek", "gemini", "claude", "local"}
+
+var tempUnits = []string{"celsius", "fahrenheit"}
 
 var asciiTitle = ` 888     888          888            888      888                                           
  888   o  888          888            888      888                                           
@@ -31,8 +34,9 @@ var asciiTitle = ` 888     888          888            888      888
  888P     Y888 "Y888888  "Y888 "Y8888P 888  888  "Y888 "Y88P"   "Y8888888P"   "Y8888  888`
 
 type SetupModel struct {
-	step        int
-	selectedIdx int
+	step                int
+	selectedIdx         int
+	tempUnitSelectedIdx int
 
 	apiKeyInput  textinput.Model
 	cityInput    textinput.Model
@@ -133,9 +137,7 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch msg.Type {
 			case tea.KeyEnter:
 				if m.cityInput.Value() != "" && m.countryInput.Value() != "" {
-					m.step = stepSaving
-					m.geocoding = true
-					cmds = append(cmds, m.doGeocode())
+					m.step = stepTempUnit
 					cmds = append(cmds, func() tea.Msg {
 						return tea.WindowSizeMsg{
 							Width:  m.width,
@@ -152,6 +154,24 @@ func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cityInput, cmd1 = m.cityInput.Update(msg)
 				m.countryInput, cmd2 = m.countryInput.Update(msg)
 				cmds = append(cmds, cmd1, cmd2)
+			}
+
+		case stepTempUnit:
+			switch msg.Type {
+			case tea.KeyUp, tea.KeyShiftTab:
+				m.tempUnitSelectedIdx = (m.tempUnitSelectedIdx - 1 + len(tempUnits)) % len(tempUnits)
+			case tea.KeyDown, tea.KeyTab:
+				m.tempUnitSelectedIdx = (m.tempUnitSelectedIdx + 1) % len(tempUnits)
+			case tea.KeyEnter:
+				m.step = stepSaving
+				m.geocoding = true
+				cmds = append(cmds, m.doGeocode())
+				cmds = append(cmds, func() tea.Msg {
+					return tea.WindowSizeMsg{
+						Width:  m.width,
+						Height: m.height,
+					}
+				})
 			}
 
 		case stepSaving:
@@ -200,7 +220,7 @@ func (m SetupModel) View() string {
 		return "Initializing setup..."
 	}
 
-	stepIndicator := StyleStepIndicator.Render(fmt.Sprintf("[%d/4]", m.step+1))
+	stepIndicator := StyleStepIndicator.Render(fmt.Sprintf("[%d/5]", m.step+1))
 	header := lipgloss.JoinVertical(
 		lipgloss.Center,
 		stepIndicator,
@@ -215,6 +235,8 @@ func (m SetupModel) View() string {
 		content = m.renderAPIKeyStep()
 	case stepLocation:
 		content = m.renderLocationStep()
+	case stepTempUnit:
+		content = m.renderTempUnitStep()
 	case stepSaving:
 		content = m.renderSavingStep()
 	case stepDone:
@@ -289,6 +311,23 @@ func (m SetupModel) renderLocationStep() string {
 	return content
 }
 
+func (m SetupModel) renderTempUnitStep() string {
+	content := StyleAccent.Render(asciiTitle) + "\n\n"
+	content += StylePrompt.Render("Select temperature unit:") + "\n\n"
+
+	for i, unit := range tempUnits {
+		if i == m.tempUnitSelectedIdx {
+			content += StyleSelectedItem.Render("> "+unit) + "\n"
+		} else {
+			content += StyleMuted.Render("  "+unit) + "\n"
+		}
+	}
+
+	content += "\n" + StyleHint.Render("Use ↑↓ or tab to select, Enter to continue")
+
+	return content
+}
+
 func (m SetupModel) renderSavingStep() string {
 	var lines []string
 
@@ -339,6 +378,7 @@ func (m SetupModel) doSave(lat, lon float64) tea.Cmd {
 				Latitude:  lat,
 				Longitude: lon,
 			},
+			TempUnit:       tempUnits[m.tempUnitSelectedIdx],
 			RefreshSec:     120,
 			BriefCacheMins: 60,
 			CryptoPairs:    []string{"bitcoin", "ethereum", "dogecoin", "usd-coin"},

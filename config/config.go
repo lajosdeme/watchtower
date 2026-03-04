@@ -20,6 +20,7 @@ type Config struct {
 	LLMAPIKey      string   `mapstructure:"llm_api_key"`
 	LLMModel       string   `mapstructure:"llm_model"`
 	Location       Location `mapstructure:"location"`
+	TempUnit       string   `mapstructure:"temp_unit"`
 	RefreshSec     int      `mapstructure:"refresh_seconds"`
 	CryptoPairs    []string `mapstructure:"crypto_pairs"`
 	BriefCacheMins int      `mapstructure:"brief_cache_minutes"`
@@ -71,6 +72,9 @@ func Load() (*Config, error) {
 	if len(cfg.CryptoPairs) == 0 {
 		cfg.CryptoPairs = []string{"bitcoin", "ethereum", "dogecoin", "usd-coin"}
 	}
+	if cfg.TempUnit == "" {
+		cfg.TempUnit = "celsius"
+	}
 
 	return &cfg, nil
 }
@@ -109,6 +113,7 @@ func Save(cfg *Config) error {
 		"latitude":  cfg.Location.Latitude,
 		"longitude": cfg.Location.Longitude,
 	})
+	v.Set("temp_unit", cfg.TempUnit)
 	v.Set("refresh_seconds", cfg.RefreshSec)
 	v.Set("crypto_pairs", cfg.CryptoPairs)
 	v.Set("brief_cache_minutes", cfg.BriefCacheMins)
