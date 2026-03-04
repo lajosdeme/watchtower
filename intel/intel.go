@@ -56,7 +56,7 @@ var providerDefaults = map[Provider]struct {
 	},
 	ProviderClaude: {
 		endpoint:     "https://api.anthropic.com/v1/messages",
-		defaultModel: "claude-3-haiku-20240307",
+		defaultModel: "claude-sonnet-4-6",
 		authHeader:   "x-api-key",
 		authPrefix:   "",
 	},
