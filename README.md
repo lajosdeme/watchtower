@@ -26,7 +26,7 @@ Pick the best option depending on your platform.
 
 ### Universal install script
 ```
-curl -fsSL https://raw.githubusercontent.com/lajosdeme/watchtower/main/install.sh
+curl -fsSL https://raw.githubusercontent.com/lajosdeme/watchtower/main/install.sh | sh
 ```
 
 ### Homebrew
