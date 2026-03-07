@@ -1071,8 +1071,8 @@ func (m Model) renderNewsContent() (string, int) {
 
 		// Truncate title to fit exactly one line
 		titleLine := item.Title
-		if len(titleLine) > titleW {
-			runes := []rune(titleLine)
+		runes := []rune(titleLine)
+		if len(runes) > titleW {
 			titleLine = string(runes[:titleW-1]) + "…"
 		}
 		urlIndicator := ""
