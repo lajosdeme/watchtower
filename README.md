@@ -79,7 +79,7 @@ go install github.com/lajosdeme/watchtower@latest
 
 On first run, Watchtower will prompt you to configure a few things:
 
-1. **Select LLM provider** — Choose Groq (free), OpenAI, Deepseek, Gemini, or Anthropic, or local model
+1. **Select LLM provider** — Choose Groq (free), OpenAI, Deepseek, Gemini, Anthropic, OpenRouter, or local model
 2. **Paste your API key** — Stored locally in `~/.config/watchtower/config.yaml`, never leaves your device
 3. **Specify your location** — Enter your city and coordinates for local weather and news
 
@@ -111,7 +111,7 @@ That's it! The app saves your settings and you're ready to go.
 | Polymarket | Prediction markets | None (public API) |
 | Yahoo Finance | Stocks & commodities | None |
 | Open-Meteo | Weather | None |
-| Groq / OpenAI / Anthropic / Deepseek / Gemini / Local | AI brief | Required (free tiers available) |
+| Groq / OpenAI / Anthropic / Deepseek / Gemini / OpenRouter / Local | AI brief | Required (free tiers available) |
 
 ## Tech Stack
 

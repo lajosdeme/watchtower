@@ -16,12 +16,13 @@ import (
 type Provider string
 
 const (
-	ProviderGroq     Provider = "groq"
-	ProviderOpenAI   Provider = "openai"
-	ProviderDeepSeek Provider = "deepseek"
-	ProviderGemini   Provider = "gemini"
-	ProviderClaude   Provider = "claude"
-	ProviderLocal    Provider = "local"
+	ProviderGroq      Provider = "groq"
+	ProviderOpenAI    Provider = "openai"
+	ProviderDeepSeek  Provider = "deepseek"
+	ProviderGemini    Provider = "gemini"
+	ProviderClaude    Provider = "claude"
+	ProviderLocal     Provider = "local"
+	ProviderOpenRouter Provider = "openrouter"
 )
 
 var providerDefaults = map[Provider]struct {
@@ -63,6 +64,12 @@ var providerDefaults = map[Provider]struct {
 	ProviderLocal: {
 		endpoint:     "http://localhost:11434/v1/chat/completions",
 		defaultModel: "llama3",
+		authHeader:   "Authorization",
+		authPrefix:   "Bearer ",
+	},
+	ProviderOpenRouter: {
+		endpoint:     "https://openrouter.ai/api/v1/chat/completions",
+		defaultModel: "openai/chatgpt-4o-latest",
 		authHeader:   "Authorization",
 		authPrefix:   "Bearer ",
 	},
